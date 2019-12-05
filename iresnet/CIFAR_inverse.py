@@ -276,7 +276,6 @@ def main():
         in_shapes = model.module.get_in_shapes()
     else:
         in_shapes = model.get_in_shapes()
-
     # optionally resume from a checkpoint
     if args.resume:
         args.resume = os.path.join(args.save_dir, 'checkpoint.t{}'.format(args.resume))
@@ -288,7 +287,7 @@ def main():
             print('objective: '+str(best_objective))
             model = checkpoint['model']
             # if use_cuda:
-            #     model.module.set_num_terms(args.numSeriesTerms)
+            #     (model.module).set_num_terms(args.numSeriesTerms)
             # else:
             #     model.set_num_terms(args.numSeriesTerms)
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -296,61 +295,80 @@ def main():
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
-    try_make_dir(args.save_dir)
-    if args.analysisTraceEst:
-        anaylse_trace_estimation(model, testset, use_cuda, args.extension)
-        return
+    # try_make_dir(args.save_dir)
+    # if args.analysisTraceEst:
+    #     anaylse_trace_estimation(model, testset, use_cuda, args.extension)
+    #     return
+    #
+    # if args.norm:
+    #     test_spec_norm(model, in_shapes, args.extension)
+    #     return
+    #
+    # if args.interpolate:
+    #     interpolate(model, testloader, testset, start_epoch, use_cuda, best_objective, args.dataset)
+    #     return
+    #
+    # if args.evaluate:
+    #     test_log = open(os.path.join(args.save_dir, "test_log.txt"), 'w')
+    #     if use_cuda:
+    #         model.module.set_num_terms(args.numSeriesTerms)
+    #     else:
+    #         model.set_num_terms(args.numSeriesTerms)
+    #     model = torch.nn.DataParallel(model.module)
+    #     test(best_objective, args, model, start_epoch, testloader, viz, use_cuda, test_log)
+    #     return
 
-    if args.norm:
-        test_spec_norm(model, in_shapes, args.extension)
-        return
-
-    if args.interpolate:
-        interpolate(model, testloader, testset, start_epoch, use_cuda, best_objective, args.dataset)
-        return
-
-    if args.evaluate:
-        test_log = open(os.path.join(args.save_dir, "test_log.txt"), 'w')
-        if use_cuda:
-            model.module.set_num_terms(args.numSeriesTerms)
-        else:
-            model.set_num_terms(args.numSeriesTerms)
-        model = torch.nn.DataParallel(model.module)
-        test(best_objective, args, model, start_epoch, testloader, viz, use_cuda, test_log)
-        return
-
-    print('|  Train Epochs: ' + str(args.epochs))
-    print('|  Initial Learning Rate: ' + str(args.lr))
+    # print('|  Train Epochs: ' + str(args.epochs))
+    # print('|  Initial Learning Rate: ' + str(args.lr))
 
     elapsed_time = 0
     test_objective = -np.inf
 
-    if args.optimizer == "adam":
-        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    elif args.optimizer == "adamax":
-        optimizer = optim.Adamax(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr,
-                              momentum=0.9, weight_decay=args.weight_decay, nesterov=args.nesterov)
+    # if args.optimizer == "adam":
+    #     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # elif args.optimizer == "adamax":
+    #     optimizer = optim.Adamax(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # else:
+    #     optimizer = optim.SGD(model.parameters(), lr=args.lr,
+    #                           momentum=0.9, weight_decay=args.weight_decay, nesterov=args.nesterov)
+    #
+    # with open(os.path.join(args.save_dir, 'params.txt'), 'w') as f:
+    #     f.write(json.dumps(args.__dict__))
 
-    with open(os.path.join(args.save_dir, 'params.txt'), 'w') as f:
-        f.write(json.dumps(args.__dict__))
-
-    train_log = open(os.path.join(args.save_dir, "train_log.txt"), 'w')
-
-    for epoch in range(1, 1+args.epochs):
-        start_time = time.time()
-        train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, train_log)
-        epoch_time = time.time() - start_time
-        elapsed_time += epoch_time
-        print('| Elapsed time : %d:%02d:%02d' % (get_hms(elapsed_time)))
-
+    # train_log = open(os.path.join(args.save_dir, "train_log.txt"), 'w')
+    #
+    # for epoch in range(1, 1+args.epochs):
+    #     start_time = time.time()
+    #     train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, train_log)
+    #     epoch_time = time.time() - start_time
+    #     elapsed_time += epoch_time
+    #     print('| Elapsed time : %d:%02d:%02d' % (get_hms(elapsed_time)))
+    epoch = 7
     print('Testing model')
-    test_log = open(os.path.join(args.save_dir, "test_log.txt"), 'w')
-    test_objective = test(test_objective, args, model, epoch, testloader, viz, use_cuda, test_log)
-    print('* Test results : objective = %.2f%%' % (test_objective))
-    with open(os.path.join(args.save_dir, 'final.txt'), 'w') as f:
-        f.write(str(test_objective))
+    model.eval()
+    total = 0
+    for batch_idx, (inputs, targets) in enumerate(testloader):
+        if use_cuda:
+            inputs, targets = inputs.cuda(), targets.cuda()
+        inputs, targets = Variable(inputs, requires_grad=True), Variable(targets)
+
+        out, out_bij = model(inputs)
+        # divide out_bij into 2 parts
+        bs = inputs.size(0) // 2
+        z_1 = out_bij[:bs, ...]
+        z_2 = out_bij[bs:, ...]
+        z = (z_1 + z_2) / 2
+        x_hat = model.module.inverse(z)
+        torchvision.utils.save_image(x_hat.cpu(),
+                                     os.path.join('results/', "inverse_{}.jpg".format(batch_idx)),
+                                     int(bs**.5), normalize=True)
+        if batch_idx > 2:
+            break
+        _, predicted = torch.max(out.data, 1)
+        del out, out_bij, _, predicted
+
+        total += targets.size(0)
+        del inputs, targets
 
 
 if __name__ == '__main__':

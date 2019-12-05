@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+iresnet/data/
+iresnet/results/
+iresnet/saved/
 
 # Distribution / packaging
 .Python

@@ -92,7 +92,7 @@ def train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, t
     params = sum([np.prod(p.size()) for p in model.parameters()])
     print('|  Number of Trainable Parameters: ' + str(params))
     print('\n=> Training Epoch #%d, LR=%.4f' % (epoch, lr))
-          
+
     for batch_idx, (inputs, targets) in enumerate(trainloader):
         cur_iter = (epoch - 1) * len(trainloader) + batch_idx
         # if first epoch use warmup
@@ -103,9 +103,9 @@ def train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, t
         if use_cuda:
             inputs, targets = inputs.cuda(), targets.cuda()  # GPU settings
         optimizer.zero_grad()
-        
+
         inputs, targets = Variable(inputs, requires_grad=True), Variable(targets)
-        
+
 
         if args.densityEstimation: # density estimation
             _, logpz, trace = model(inputs)  # Forward Propagation
@@ -115,21 +115,21 @@ def train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, t
         else: # classification
             out, _ = model(inputs)
             loss = criterion(out, targets) # Loss
-        
+
         # logging for sigmas. NOTE: needs to be done before backward-call
         if args.densityEstimation and args.log_verbose:
             if batch_idx % args.log_every == 0:
                 sigmas = []
                 for k in model.state_dict().keys():
-                    if 'bottleneck' and 'weight_orig' in k:               
+                    if 'bottleneck' and 'weight_orig' in k:
                         sigma = model.state_dict()[k[:-5] + '_sigma']
                         sigmas.append(sigma.item())
                 sigmas = np.array(sigmas)
                 line_plot(viz, "sigma all layers", cur_iter, sigmas)
-                
+
         loss.backward()  # Backward Propagation
         optimizer.step()  # Optimizer update
-                
+
         if args.densityEstimation: # logging for density estimation
             if batch_idx % args.log_every == 0:
                 mean_trace = trace.mean().item()
@@ -170,18 +170,18 @@ def train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, t
                         actnorm_l2 = np.array(actnorm_l2)
                         line_plot(viz, "max actnorm scale per layer", cur_iter, actnorm_scales)
                         line_plot(viz, "min actnorm scale per layer", cur_iter, actnorm_scales_min)
-                        line_plot(viz, "l2 norm of actnorm scale per layer", cur_iter, actnorm_l2)  
+                        line_plot(viz, "l2 norm of actnorm scale per layer", cur_iter, actnorm_l2)
                     # learned prior logging
                     if not args.fixedPrior:
                         prior_scales_max = torch.max(model.state_dict()['module.prior_logstd'])
                         prior_scales_min = torch.min(model.state_dict()['module.prior_logstd'])
                         line_plot(viz, "max prior scale", cur_iter, prior_scales_max.item())
-                        line_plot(viz, "min prior scale", cur_iter, prior_scales_min.item())  
+                        line_plot(viz, "min prior scale", cur_iter, prior_scales_min.item())
 
         else: # logging for classification
             _, predicted = torch.max(out.data, 1)
             total += targets.size(0)
-            correct += predicted.eq(targets.data).cpu().sum()    
+            correct += predicted.eq(targets.data).cpu().sum()
             if batch_idx % 1 == 0:
                 sys.stdout.write('\r')
                 sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f'
@@ -200,6 +200,7 @@ def test(best_result, args, model, epoch, testloader, viz, use_cuda, test_log):
             inputs, targets = inputs.cuda(), targets.cuda()
         inputs, targets = Variable(inputs, requires_grad=True), Variable(targets)
 
+        from IPython import embed; embed()
         if args.densityEstimation:
             z, logpz, trace = model(inputs)
             logpx = logpz + trace
@@ -291,7 +292,7 @@ def _clipping_comp(param, key, coeff, input_shape, use_cuda):
     fft_coeff = np.fft.fft2(convKernel, input_shape, axes=[2, 3])
     t_fft_coeff = np.transpose(fft_coeff)
     U, D, V = np.linalg.svd(t_fft_coeff, compute_uv=True, full_matrices=False)
-    if np.max(D) > coeff: 
+    if np.max(D) > coeff:
         # first projection onto given norm ball
         Dclip = np.minimum(D, coeff)
         coeffsClipped = np.matmul(U * Dclip[..., None, :], V)
@@ -299,7 +300,7 @@ def _clipping_comp(param, key, coeff, input_shape, use_cuda):
         # 1) second projection back to kxk filter kernels
         # and transpose to undo previous transpose operation (used for batch SVD)
         kernelSize1, kernelSize2 = convKernel.shape[2:]
-        convKernelClipped = np.transpose(convKernelClippedfull[:kernelSize1, :kernelSize2])          
+        convKernelClipped = np.transpose(convKernelClippedfull[:kernelSize1, :kernelSize2])
         # reset kernel (using in-place update)
         if use_cuda:
             param.data += torch.tensor(convKernelClipped).float().cuda() - param.data

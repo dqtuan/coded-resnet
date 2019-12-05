@@ -85,7 +85,7 @@ class conv_iresnet_block(nn.Module):
 
         # set shapes for spectral norm conv
         in_ch, h, w = in_shape
-            
+
         layers = []
         if input_nonlin:
             layers.append(nonlin())
@@ -143,11 +143,11 @@ class conv_iresnet_block(nn.Module):
         if self.stride == 2:
             x = self.squeeze.inverse(x)
         return x
-    
+
     def _wrapper_spectral_norm(self, layer, shapes, kernel_size):
         if kernel_size == 1:
             # use spectral norm fc, because bound are tight for 1x1 convolutions
-            return spectral_norm_fc(layer, self.coeff, 
+            return spectral_norm_fc(layer, self.coeff,
                                     n_power_iterations=self.n_power_iter)
         else:
             # use spectral norm based on conv, because bound not tight
@@ -293,7 +293,7 @@ class multiscale_conv_iResNet(nn.Module):
                                 stride == 2, n_terms, n_samples,
                                 coeff, i > 0, actnorm,
                                 i < n_blocks - 1,
-                                n_power_iter, 
+                                n_power_iter,
                                 nonlin)  # split on all but last layer
             in_shape = block.out_shapes[-1]
             in_shapes.append(in_shape)
@@ -502,7 +502,7 @@ class conv_iResNet(nn.Module):
 
     def get_in_shapes(self):
         return self.in_shapes
-    
+
     def inspect_singular_values(self):
         i = 0
         j = 0
@@ -513,7 +513,7 @@ class conv_iResNet(nn.Module):
                   and not "linear" in v]
         print(len(params))
         print(len(self.in_shapes))
-        svs = [] 
+        svs = []
         for param in params:
           input_shape = tuple(self.in_shapes[j])
           # get unscaled parameters from state dict
@@ -526,7 +526,7 @@ class conv_iResNet(nn.Module):
           fft_coeff = np.fft.fft2(convKernel, input_shape, axes=[2, 3])
           t_fft_coeff = np.transpose(fft_coeff)
           D = np.linalg.svd(t_fft_coeff, compute_uv=False, full_matrices=False)
-          Dflat = np.sort(D.flatten())[::-1] 
+          Dflat = np.sort(D.flatten())[::-1]
           print("Layer "+str(j)+" Singular Value "+str(Dflat[0]))
           svs.append(Dflat[0])
           if i == 2:
@@ -589,8 +589,9 @@ class conv_iResNet(nn.Module):
 
     def set_num_terms(self, n_terms):
         for block in self.stack:
-            for layer in block.stack:
-                layer.numSeriesTerms = n_terms
+            block.numSeriesTerms = n_terms
+            # for layer in block.stack:
+                # layer.numSeriesTerms = n_terms
 
 
 if __name__ == "__main__":
@@ -652,4 +653,3 @@ if __name__ == "__main__":
     for i in range(20):
         x_re = resnet.inverse(out, i)
         print(i, diff(x, x_re))
-

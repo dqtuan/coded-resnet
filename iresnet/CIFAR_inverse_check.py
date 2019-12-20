@@ -349,45 +349,35 @@ def main():
     print('Testing model')
     model.eval()
     total = 0
-    bs = args.batch // 2
-    for batch_idx, (inputs, targets) in enumerate(trainloader):
-        if use_cuda:
-            inputs, targets = inputs.cuda(), targets.cuda()
-        inputs, targets = Variable(inputs, requires_grad=False), Variable(targets)
 
-        out, out_bij = model(inputs)
-        # divide out_bij into 2 parts
-        z_a = out_bij[:bs, ...]
-        z_b = out_bij[bs:, ...]
-        z_ab = (z_a + z_b) / 2
-        x_ab = model.module.inverse(z_ab)
-        # sanity check
-        torchvision.utils.save_image(x_ab.cpu(),
-                                     os.path.join(args.save_dir, "inverse_{}.jpg".format(batch_idx)),
-                                     int(bs**.5), normalize=True)
-        out_b = out[bs:, ...].data
-        _, predicted_b = torch.max(out_b, 1)
-        _, z_c = model(x_ab)
+    for k in range(20):
+        save_path = os.path.join(result_path, "data_{}.npy".format(k))
+        data = np.load(save_path, allow_pickle=True)
+        data = data.item()
+        ta = torch.Tensor(data['a']).cuda()
+        tb = torch.Tensor(data['b']).cuda()
+        tc = torch.Tensor(data['fusion']).cuda()
+
+        out_a, z_a = model(ta)
+        out_b, z_b = model(tb)
+        out_c, z_c = model(tc)
+        z_ab = (z_a + z_b)/2
+        # sanity check: 6.3
+        # error = ((z_a + z_b) / 2 - z_c).view(128, 192*16)
+        # print(torch.mean(torch.norm(error, dim=1)))
+            # Not correct
+            # tb_hat = (tc*2 - tb)
+            # out_b_hat, z_b_hat = model(tb_hat)
         z_b_hat = z_c * 2 - z_a
         out_b_hat = model.module.classifier(z_b_hat)
+        _, predicted_b = torch.max(out_b.data, 1)
         _, predicted_b_hat = torch.max(out_b_hat.data, 1)
         objective = predicted_b_hat.eq(predicted_b.data).sum().item()
-        print('Correct clasification: ', objective/bs)
 
-        img1 = inputs[:bs, ...].detach().cpu().numpy()
-        img2 = inputs[bs:, ...].detach().cpu().numpy()
-        img = x_ab.detach().cpu().numpy()
-        dict = {'a': img1, 'b': img2, 'fusion': img}
-        print('Save ', batch_idx)
-        save_path = os.path.join(result_path, "data_{}.npy".format(batch_idx))
-        np.save(save_path, dict)
-
-        # _, predicted = torch.max(out.data, 1)
-        # del out, out_bij, _, predicted
-
-        total += targets.size(0)
-        del inputs, targets
-
+        print(k)
+        MAE = torch.mean(torch.norm(z_ab - z_c, dim=1)/torch.norm(z_ab, dim=1))
+        print('Error: ', MAE)
+        print('Objective: ', objective/ta.shape[0])
 
 if __name__ == '__main__':
     main()

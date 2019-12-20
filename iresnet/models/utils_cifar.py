@@ -200,7 +200,6 @@ def test(best_result, args, model, epoch, testloader, viz, use_cuda, test_log):
             inputs, targets = inputs.cuda(), targets.cuda()
         inputs, targets = Variable(inputs, requires_grad=True), Variable(targets)
 
-        from IPython import embed; embed()
         if args.densityEstimation:
             z, logpz, trace = model(inputs)
             logpx = logpz + trace

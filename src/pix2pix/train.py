@@ -41,7 +41,7 @@ opt = parser.parse_args()
 print(opt)
 
 checkpoint_path = os.path.join(opt.result_path, 'fusion/checkpoint/cifar10')
-net_g_model_out_path = os.path.join(checkpoint_path, "netG_model_epoch.pth")
+net_g_model_out_path = os.path.join(checkpoint_path, "netG_model_mse.pth")
 if not os.path.exists(checkpoint_path):
 	os.mkdir(checkpoint_path)
 sample_path = os.path.join(opt.result_path, 'fusion/samples')
@@ -60,8 +60,12 @@ print('===> Loading datasets')
 
 data_path = os.path.join(opt.data_path, 'cifar10/data.npy')
 data = np.load(data_path).astype('float32')
-train_set = torch.Tensor(data)
+total_samples = data.shape[0]
+ntrains = int(total_samples * 0.75)
+train_set = torch.Tensor(data[:ntrains, ...])
+test_set = torch.Tensor(data[ntrains:, ...])
 training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batch_size, shuffle=True)
+testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=opt.batch_size, shuffle=False)
 
 print('===> Building models')
 net_g = define_G(opt.input_nc*2, opt.output_nc, opt.ngf, 'batch', False, 'normal', 0.02, gpu_id=device)
@@ -74,17 +78,26 @@ criterionMSE = nn.MSELoss().to(device)
 optimizer_g = optim.Adam(net_g.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 net_g_scheduler = get_scheduler(optimizer_g, opt)
 
+def norm(img):
+	min = float(img.min())
+	max = float(img.max())
+	img = img.clamp_(min=min, max=max)
+	img = img.add_(-min).div_(max - min + 1e-5)
+	return (img - 0.5) * 2
+
 for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 
 	for iteration, batch in enumerate(training_data_loader, 1):
 		# forward
 		batch = batch.to(device)
+		# [-2.7; 2.3]
 		input_a = batch[:, 0, ...]
 		input_b = batch[:, 1, ...]
-		input = torch.cat((input_a, input_b), dim=1)
 		target = batch[:, 2, ...]
+		input = torch.cat((input_a, input_b), dim=1)
 		# train with fake
 		optimizer_g.zero_grad()
+		# [-1, 1]
 		pred = net_g(input)
 		loss = criterionMSE(pred, target)
 		loss.backward()
@@ -95,7 +108,7 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 
 	update_learning_rate(net_g_scheduler, optimizer_g)
 	#checkpoint
-	if epoch % 1 == 0:
+	if epoch % 5 == 0:
 		torch.save(net_g, net_g_model_out_path)
 		print("Checkpoint saved to {}".format("checkpoint" + opt.dataset))
 
@@ -105,3 +118,19 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
 	for i in range(len(lst)):
 		sample_path = os.path.join(opt.result_path, "fusion/samples/epoch_{}_{}.jpg".format(epoch, lst[i]))
 		torchvision.utils.save_image(samples[i].cpu(), sample_path, int(opt.batch_size**.5), normalize=True)
+
+lossf = []
+for iteration, batch in enumerate(testing_data_loader, 1):
+	# forward
+	batch = batch.to(device)
+	# [-2.7; 2.3]
+	input_a = batch[:, 0, ...]
+	input_b = batch[:, 1, ...]
+	target = batch[:, 2, ...]
+	input = torch.cat((input_a, input_b), dim=1)
+	# train with fake
+	# [-1, 1]
+	pred = net_g(input)
+	loss = criterionMSE(pred, target)
+	lossf.append(loss.detach().cpu().data)
+print('Test - MSE: ', np.mean(lossf))

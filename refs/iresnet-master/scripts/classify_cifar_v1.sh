@@ -1,0 +1,1 @@
+python ./CIFAR_main_v1.py --nBlocks 7 7 7 --nStrides 1 2 2 --nChannels 32 64 128 --coeff 0.9 --batch 128 --dataset cifar10 --init_ds 1 --inj_pad 13 --powerIterSpectralNorm 5 --save_dir ../results/inverse/ --nonlin elu --optimizer sgd --vis_server localhost  --vis_port  8097 --resume 0 --epochs 70

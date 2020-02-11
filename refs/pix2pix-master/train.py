@@ -14,7 +14,7 @@ from data import get_training_set, get_test_set
 
 # Training settings
 parser = argparse.ArgumentParser(description='pix2pix-pytorch-implementation')
-parser.add_argument('--dataset', required=True, help='facades')
+parser.add_argument('--dataset', default='facades', required=False, help='facades')
 parser.add_argument('--batch_size', type=int, default=1, help='training batch size')
 parser.add_argument('--test_batch_size', type=int, default=1, help='testing batch size')
 parser.add_argument('--direction', type=str, default='b2a', help='a2b or b2a')
@@ -47,7 +47,7 @@ if opt.cuda:
     torch.cuda.manual_seed(opt.seed)
 
 print('===> Loading datasets')
-root_path = "dataset/"
+root_path = "../data/"
 train_set = get_training_set(root_path + opt.dataset, opt.direction)
 test_set = get_test_set(root_path + opt.dataset, opt.direction)
 training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batch_size, shuffle=True)
@@ -75,7 +75,6 @@ for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
         # forward
         real_a, real_b = batch[0].to(device), batch[1].to(device)
         fake_b = net_g(real_a)
-
         ######################
         # (1) Update D network
         ######################

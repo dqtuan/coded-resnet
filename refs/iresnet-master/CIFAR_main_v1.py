@@ -77,7 +77,7 @@ def try_make_dir(d):
     if not os.path.isdir(d):
         os.mkdir(d)
 
-try_make_dir('results')
+# try_make_dir('results')
 
 def anaylse_trace_estimation(model, testset, use_cuda, extension):
     # setup range for analysis
@@ -279,22 +279,23 @@ def main():
 
     # optionally resume from a checkpoint
     if args.resume:
-        args.resume = os.path.join(args.save_dir, 'checkpoint.t{}'.format(args.resume))
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
+        checkpoint_path = os.path.join(args.save_dir, 'checkpoints/checkpoint.e{}'.format(args.resume))
+        if os.path.isfile(checkpoint_path):
+            print("=> loading checkpoint '{}'".format(checkpoint_path))
+            checkpoint = torch.load(checkpoint_path)
             start_epoch = checkpoint['epoch']
             best_objective = checkpoint['objective']
             print('objective: '+str(best_objective))
             model = checkpoint['model']
+            # comment here
             # if use_cuda:
             #     model.module.set_num_terms(args.numSeriesTerms)
             # else:
             #     model.set_num_terms(args.numSeriesTerms)
             print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+                  .format(checkpoint_path, checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+            print("=> no checkpoint found at '{}'".format(checkpoint_path))
 
     try_make_dir(args.save_dir)
     if args.analysisTraceEst:
@@ -338,12 +339,68 @@ def main():
 
     train_log = open(os.path.join(args.save_dir, "train_log.txt"), 'w')
 
+    sample_path = os.path.join(args.save_dir, 'samples')
+    try_make_dir(sample_path)
+
+    def save_images(sample_path, train_epoch, bs, samples, sample_name):
+        torchvision.utils.save_image(samples.cpu(), os.path.join(sample_path, "epoch_{}_{}.jpg".format(train_epoch, sample_name)), int(bs**.5), normalize=True)
+
+    def test_inverse(model, train_epoch):
+        model.eval()
+        correct_b = 0
+        correct_b_hat = 0
+        match_b = 0
+        total = 0
+        bs = args.batch // 2
+        for batch_idx, (inputs, targets) in enumerate(testloader):
+            if batch_idx >= 1:
+                break
+            if use_cuda:
+                inputs, targets = inputs.cuda(), targets.cuda()
+            inputs, targets = Variable(inputs, requires_grad=False), Variable(targets)
+
+            out, out_bij = model(inputs)
+            # divide out_bij into 2 parts
+            z_a = out_bij[:bs, ...]
+            z_b = out_bij[bs:, ...]
+            z_ab = (z_a + z_b) / 2
+            x_c = model.module.inverse(z_ab)
+            _, z_c = model(x_c)
+            z_b_hat = z_c * 2 - z_a
+
+            real_b = inputs[bs:, ...]
+            x_b = model.module.inverse(z_b)
+            x_b_hat = model.module.inverse(z_b_hat)
+            x_b_noise = model.module.inverse(z_b * 1.01)
+
+            save_images(sample_path, train_epoch, bs, real_b, 'real')
+            save_images(sample_path, train_epoch, bs, x_b, 'inverse')
+            save_images(sample_path, train_epoch, bs, x_b_hat, 'inverse_hat')
+            save_images(sample_path, train_epoch, bs, x_b_noise, 'inverse_noise')
+
+            out_b = model.module.classifier(z_b)
+            out_b_hat = model.module.classifier(z_b_hat)
+            _, y_b = torch.max(out_b.data, 1)
+            _, y_b_hat = torch.max(out_b_hat.data, 1)
+            targets = targets[bs:, ...]
+
+            correct_b += y_b.eq(targets.data).sum().item()
+            correct_b_hat += y_b_hat.eq(targets.data).sum().item()
+            match_b += y_b_hat.eq(y_b.data).sum().item()
+            total += bs
+
+        print('Correct %: real {:.4f} reconstruct {:.4f} match {:.4f}'.format(100*correct_b/total, 100*correct_b_hat/total, 100*match_b/total))
+
+
     for epoch in range(1, 1+args.epochs):
         start_time = time.time()
         train(args, model, optimizer, epoch, trainloader, trainset, viz, use_cuda, train_log)
         epoch_time = time.time() - start_time
         elapsed_time += epoch_time
         print('| Elapsed time : %d:%02d:%02d' % (get_hms(elapsed_time)))
+        # test inverse function
+        test_inverse(model, epoch)
+
 
     print('Testing model')
     test_log = open(os.path.join(args.save_dir, "test_log.txt"), 'w')
@@ -351,6 +408,16 @@ def main():
     print('* Test results : objective = %.2f%%' % (test_objective))
     with open(os.path.join(args.save_dir, 'final.txt'), 'w') as f:
         f.write(str(test_objective))
+
+    # store model afer all
+    checkpoint_path = os.path.join(args.save_dir, 'checkpoints/ checkpoint.e{}'.format(args.epochs))
+    print('Save checkpoint at ', checkpoint_path)
+    state = {
+        'model': model,
+        'objective': test_objective,
+        'epoch': epoch,
+    }
+    torch.save(state, checkpoint_path)
 
 
 if __name__ == '__main__':

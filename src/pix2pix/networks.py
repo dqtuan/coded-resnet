@@ -78,7 +78,7 @@ def define_G(input_nc, output_nc, ngf, norm='batch', use_dropout=False, init_typ
     norm_layer = get_norm_layer(norm_type=norm)
 
     net = ResnetGenerator(input_nc, output_nc, ngf, norm_layer=norm_layer, use_dropout=use_dropout, n_blocks=9)
-   
+
     return init_net(net, init_type, init_gain, gpu_id)
 
 
@@ -223,7 +223,7 @@ class Outconv(nn.Module):
         self.outconv = nn.Sequential(
             nn.ReflectionPad2d(3),
             nn.Conv2d(in_ch, out_ch, kernel_size=7, padding=0),
-            nn.Tanh()
+            # nn.Tanh()
         )
 
     def forward(self, x):

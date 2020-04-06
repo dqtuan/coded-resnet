@@ -31,3 +31,11 @@ watch -n 1 cat
 02/24/2020:
   ☐ Normalize the input for both cifar,
   ☐ Quatiles to see: some points are too far from std = 2
+
+04/03/2020:
+  ☐ MNIST 4 actors:
+    ☐ Vanilla: not working
+    ☐ Focus on mix-hidden: improve 57% => understand where the issues come from to improve
+    ☐ unite 2 configs 
+  ☐ logs the system every training
+  ☐ save only important checkpoints

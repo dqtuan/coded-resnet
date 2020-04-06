@@ -142,6 +142,18 @@ class conv_iResNet(nn.Module):
             # print("{:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f}".format(stats[0], stats[1], stats[2], stats[3], stats[4], stats[5], stats[6], stats[7], stats[8]))
             print('{:.6f} {:.6f} {:.6f}'.format(np.std(data), np.mean(data), np.mean(norms)))
 
+    def learn(self, x, ignore_logdet=False):
+        """ iresnet forward """
+        if self.init_ds == 2:
+            x = self.init_squeeze.forward(x)
+
+        z = x
+        for block in self.stack:
+            z, _ = block(z, ignore_logdet=ignore_logdet)
+
+        logits = self.classifier(z)
+        return logits, z
+
     def forward(self, x, targets=None, mixup=False, mixup_hidden=False, mixup_alpha=None, ignore_logdet=False):
         """ iresnet forward """
         if mixup_hidden:

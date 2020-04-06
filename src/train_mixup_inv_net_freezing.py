@@ -4,8 +4,9 @@
 """
 
 from init_invnet import *
+from torch.optim import lr_scheduler
 
-inet = iResNet(nBlocks=args.nBlocks,
+model = iResNet(nBlocks=args.nBlocks,
 				nStrides=args.nStrides,
 				nChannels=args.nChannels,
 				nClasses=args.nClasses,
@@ -25,36 +26,36 @@ inet = iResNet(nBlocks=args.nBlocks,
 init_batch = Helper.get_init_batch(trainloader, args.init_batch)
 print("initializing actnorm parameters...")
 with torch.no_grad():
-	inet(init_batch.to(device), ignore_logdet=True)
+	model(init_batch.to(device), ignore_logdet=True)
 print("initialized")
-inet = torch.nn.DataParallel(inet, range(torch.cuda.device_count()))
+model = torch.nn.DataParallel(model, range(torch.cuda.device_count()))
 
-if os.path.isfile(inet_path):
-	print("-- Loading checkpoint '{}'".format(inet_path))
+if os.path.isfile(resume_path):
+	print("-- Loading checkpoint '{}'".format(resume_path))
 	"""
-	checkpoint = torch.load(inet_path)
-	# inet = checkpoint['inet']
-	best_inet = checkpoint['inet']
+	checkpoint = torch.load(resume_path)
+	# model = checkpoint['model']
+	best_model = checkpoint['model']
 	# load dict only
-	inet.load_state_dict(best_inet.state_dict())
+	model.load_state_dict(best_model.state_dict())
 	best_objective = checkpoint['objective']
 	print('----- Objective: {:.4f}'.format(best_objective))
 	"""
-	inet.load_state_dict(torch.load(inet_path))
+	model.load_state_dict(torch.load(resume_path))
 else:
-	print("--- No checkpoint found at '{}'".format(inet_path))
+	print("--- No checkpoint found at '{}'".format(resume_path))
 	args.resume = 0
 
-in_shapes = inet.module.get_in_shapes()
+in_shapes = model.module.get_in_shapes()
 if args.optimizer == "adam":
-	optimizer = optim.Adam(inet.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+	optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 else:
-	optimizer = optim.SGD(inet.parameters(), lr=args.lr,
+	optimizer = optim.SGD(model.parameters(), lr=args.lr,
 						  momentum=0.9, weight_decay=args.weight_decay, nesterov=args.nesterov)
 
 scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 ##### Analysis ######
-if analyse(args, inet, in_shapes, trainloader, testloader):
+if analyse(args, model, in_shapes, trainloader, testloader):
 	sys.exit('Done')
 
 ##### Training ######
@@ -65,7 +66,7 @@ test_objective = -np.inf
 epoch = int(args.resume)
 for epoch in range(epoch + 1, epoch + 1 + args.epochs):
 	start_time = time.time()
-	inet.train()
+	model.train()
 	losses = AverageMeter()
 	top1 = AverageMeter()
 	top5 = AverageMeter()
@@ -83,7 +84,10 @@ for epoch in range(epoch + 1, epoch + 1 + args.epochs):
 		inputs = Variable(inputs, requires_grad=True).cuda()
 		targets = Variable(targets).cuda()
 
-		logits, _, reweighted_target = inet(inputs, targets=targets, mixup_hidden=args.mixup_hidden, mixup=args.mixup, mixup_alpha=args.mixup_alpha)
+		# logits, _, reweighted_target = model(inputs, targets=targets, mixup_hidden=args.mixup_hidden, mixup=args.mixup, mixup_alpha=args.mixup_alpha)
+
+		reweighted_target = targets
+
 		loss = bce_loss(softmax(logits), reweighted_target)
 
 		# measure accuracy and record loss
@@ -109,10 +113,10 @@ for epoch in range(epoch + 1, epoch + 1 + args.epochs):
 	print('| Elapsed time : %d:%02d:%02d' % (Helper.get_hms(elapsed_time)))
 
 	if (epoch - 1) % args.save_steps == 0:
-		test_objective = Tester.eval_invertibility(inet, testloader, sample_dir, args.model_name, num_epochs=epoch)
-		Helper.save_checkpoint(inet, test_objective, checkpoint_dir, args.optim_fnet_name, epoch)
+		test_objective = Tester.eval_invertibility(model, testloader, sample_dir, args.model_name, num_epochs=epoch)
+		Helper.save_checkpoint(model, test_objective, checkpoint_dir, args.model_name, epoch)
 
 ########################## Store ##################
-test_objective = Tester.eval_invertibility(inet, testloader, sample_dir, args.model_name, num_epochs=args.epochs)
-Helper.save_checkpoint(inet, test_objective, checkpoint_dir, args.model_name, args.epochs)
+test_objective = Tester.eval_invertibility(model, testloader, sample_dir, args.model_name, num_epochs=args.epochs)
+Helper.save_checkpoint(model, test_objective, checkpoint_dir, args.model_name, args.epochs)
 print('Done')

@@ -14,9 +14,10 @@ import torch.backends.cudnn as cudnn
 import torchvision
 
 from utils.helper import Helper
-from configs_fusionnet import args
+from configs import args
 
 from fusionnet.networks import define_G
+root = 'fnet'
 
 ############ Settings ##############
 TRAIN_FRACTION = 0.75
@@ -25,27 +26,25 @@ torch.cuda.manual_seed(args.seed)
 device = torch.device("cuda:0" if args.cuda else "cpu")
 
 # define paths
-args.model_name = args.dataset + '_' + args.model_name
-data_path = os.path.join(args.data_dir, 'data.npy')
-checkpoint_dir = os.path.join(args.save_dir, 'checkpoints')
-net_path = os.path.join(checkpoint_dir, "{}.pth".format(args.model_name))
-sample_dir = os.path.join(args.save_dir, 'samples')
-stat_path = os.path.join(args.save_dir, "{}.npy".format(args.model_name))
+args.model_name = "{}_{}_{}".format(args.dataset, args.name, args.nactors)
+
+data_dir = os.path.join(args.data_dir, root)
+data_path = os.path.join(args.data_dir, "{}_data.npy".format(args.model_name))
+stat_path = os.path.join(args.data_dir, "{}_stats.npy".format(args.model_name))
+
+checkpoint_dir = os.path.join(args.save_dir, 'checkpoints/{}'.format(root))
+sample_dir = os.path.join(args.save_dir, 'samples/{}'.format(root))
+fnet_path = os.path.join(checkpoint_dir, "{}_{}.pth".format(args.model_name))
 
 Helper.try_make_dir(args.save_dir)
 Helper.try_make_dir(checkpoint_dir)
 Helper.try_make_dir(sample_dir)
 
-# data
-if not(os.path.isfile(data_path)):
-    Helper.try_make_dir(args.data_dir)
-    Helper.combine_npys(args.npy_dir, data_path)
-
 ############ Data ##############
 dict_data = np.load(data_path, allow_pickle=True)
 dict_data = dict_data.item()
-data = dict_data['data'].astype('float32')
-targets = dict_data['targets']
+data = dict_data['images'].astype('float32')
+labels = dict_data['labels']
 nsamples = data.shape[0]
 ntrains = int(nsamples * TRAIN_FRACTION)
 stats = {
@@ -65,11 +64,10 @@ stats['input']['max'] = np.max(data[:, 0, ...], axis=(0, 2,3))
 print(stats)
 np.save(stat_path, stats)
 ############ Standarlize ##############
-snames = ['input', 'input', 'target']
-for k in range(3):
-    s = stats[snames[k]]
-    for i in range(3):
-        data[:, k, i, ...] = (data[:, k, i, ...] - s['mean'][i]) / s['std'][i]
+for i in range(args.input_nc):
+    for k in range(args.nactors):
+        data[:, k, i, ...] = (data[:, k, i, ...] - stats['input']['mean'][i]) / stats['input']['std'][i]
+    data[:, -1, i, ...] = (data[:, -1, i, ...] - stats['target']['mean'][i]) / stats['target']['std'][i]
 print('Dataset: {}, {}'.format(nsamples, ntrains))
 # apply transform??? check the range
 train_set = torch.Tensor(data[:ntrains, ...])
@@ -83,3 +81,7 @@ test_loader = DataLoader(dataset=test_set,
 
 ######## Losss ####
 criterionMSE = nn.MSELoss(reduction='sum')
+if args.dataset=='mnist':
+    npixels = 32*32*1
+else:
+    npixels = 32*32*3

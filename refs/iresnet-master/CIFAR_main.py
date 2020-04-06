@@ -280,7 +280,7 @@ def main():
     # optionally resume from a checkpoint
     if args.resume:
         checkpoint_path = os.path.join(args.save_dir, 'checkpoint.t{}'.format(args.resume))
-        if os.path.isfile(args.resume):
+        if os.path.isfile(checkpoint_path):
             print("=> loading checkpoint '{}'".format(checkpoint_path))
             checkpoint = torch.load(checkpoint_path)
             start_epoch = checkpoint['epoch']
@@ -295,7 +295,7 @@ def main():
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+            print("=> no checkpoint found at '{}'".format(checkpoint_path))
 
     try_make_dir(args.save_dir)
     if args.analysisTraceEst:

@@ -6,7 +6,7 @@
 from init_invnet import *
 from fusionnet.networks import define_G
 from torch.optim import lr_scheduler
-
+from invnet.resnet import ResNet, BasicBlock
 
 def loss_fn_kd(outputs, labels, teacher_outputs, alpha, temperature):
 	"""
@@ -25,30 +25,15 @@ def loss_fn_kd(outputs, labels, teacher_outputs, alpha, temperature):
 	return KD_loss
 
 
-inet = iResNet(nBlocks=args.nBlocks,
-				nStrides=args.nStrides,
-				nChannels=args.nChannels,
-				nClasses=args.nClasses,
-				init_ds=args.init_ds,
-				inj_pad=args.inj_pad,
-				in_shape=in_shape,
-				coeff=args.coeff,
-				numTraceSamples=args.numTraceSamples,
-				numSeriesTerms=args.numSeriesTerms,
-				n_power_iter = args.powerIterSpectralNorm,
-				density_estimation=args.densityEstimation,
-				actnorm=(not args.noActnorm),
-				learn_prior=(not args.fixedPrior),
-				nonlin=args.nonlin).to(device)
-
-init_batch = Helper.get_init_batch(trainloader, args.init_batch)
-print("initializing actnorm parameters...")
-with torch.no_grad():
-	inet(init_batch.to(device), ignore_logdet=True)
-print("initialized")
-inet = torch.nn.DataParallel(inet, range(torch.cuda.device_count()))
+if args.input_nc == 1:
+	nblocks = [5, 5, 5]
+else:
+	nblocks = [9, 9, 9]
+inet = torch.nn.DataParallel(ResNet(BasicBlock, nblocks, input_nc=args.input_nc)).to(device)
 print("-- Loading checkpoint '{}'".format(inet_path))
 inet.load_state_dict(torch.load(inet_path))
+# best_prec1 = checkpoint['best_prec1']
+# inet.load_state_dict(checkpoint['state_dict'])
 
 if args.concat_input:
 	ninputs = 1
@@ -76,7 +61,10 @@ if os.path.isfile(fnet_path):
 else:
 	print("No checkpoint found at: ", fnet_path)
 
-in_shapes = inet.module.get_in_shapes()
+### Analysis ###
+if analyse(args, inet, in_shape, trainloader, testloader):
+	sys.exit('Done')
+
 optim_fnet = optim.Adam(fnet.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
 fnet_scheduler = Helper.get_scheduler(optim_fnet, args)
 
@@ -118,17 +106,15 @@ for epoch in range(1, 1+args.epochs):
 		_, z_fused, _ = inet(img_fused)
 		z_hat = args.nactors * z_fused - z_c
 		out_hat = inet.module.classifier(z_hat)
-		out, z, target_reweighted = inet(inputs, targets)
+		out, z, _ = inet(inputs)
 
 		# inet loss
-		loss_classify = bce_loss(softmax(out_hat), target_reweighted)
 		loss_distill = loss_fn_kd(out_hat, targets, out, alpha=0.1, temperature=6)
 		loss_mse = criterionMSE(z, z_hat)
-		loss = loss_distill + loss_classify #+ 0.01 * loss_mse
+		loss = loss_distill
 
 		# measure accuracy and record loss
-		_, labels = torch.max(target_reweighted.data, 1)
-		prec1, prec5 = Helper.accuracy(out_hat, labels , topk=(1, 5))
+		prec1, prec5 = Helper.accuracy(out_hat, targets , topk=(1, 5))
 		losses.update(loss.item(), inputs.size(0))
 		top1.update(prec1.item(), inputs.size(0))
 		top5.update(prec5.item(), inputs.size(0))
@@ -139,10 +125,10 @@ for epoch in range(1, 1+args.epochs):
 
 		if batch_idx % args.log_steps == 0:
 			sys.stdout.write('\r')
-			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f Acc@5: %.3f Distill: %.3f MSE: %.3f'
+			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f Acc@5: %.3f MSE: %.3f'
 						 % (epoch, args.epochs, batch_idx+1,
 							(len(trainset)//args.batch_size)+1, loss.data.item(),
-							top1.avg, top5.avg, loss_distill.item(), loss_mse.item()))
+							top1.avg, top5.avg, loss_mse.item()))
 			sys.stdout.flush()
 
 	if epoch % args.save_steps == 0:

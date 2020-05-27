@@ -7,8 +7,35 @@ from matplotlib import pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
 from sklearn.manifold import TSNE
+SMALL_SIZE = 8
+MEDIUM_SIZE = 8
+BIGGER_SIZE = 14
+plt.style.use('ggplot')
+plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+plt.rc('axes', titlesize=BIGGER_SIZE, titleweight='bold')     # fontsize of the axes title
+plt.rc('axes', labelsize=BIGGER_SIZE, labelweight='bold')    # fontsize of the x and y labels
+plt.rc('xtick', labelsize=MEDIUM_SIZE)    # fontsize of the tick labels
+plt.rc('ytick', labelsize=MEDIUM_SIZE)    # fontsize of the tick labels
+plt.rc('legend', fontsize=MEDIUM_SIZE)    # legend fontsize
+plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+# plt.rc('text', usetex=True)
 
 class Plotter:
+    @staticmethod
+    def plot_loss(train, title, savepath, test=None):
+        fig = plt.figure()
+        plt.plot(np.arange(len(train)), train, label='train', c='r')
+        if not(test is None):
+            plt.plot(np.arange(len(test)) * 10 + 1, test, label='test', c='b')
+
+        plt.legend(loc='upper right')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title(title)
+        # plt.show()
+        fig.tight_layout()
+        fig.savefig(savepath, bbox_inches='tight')
+
     @staticmethod
     def plot_lines():
         linestyles = ['-', '--', '-.', ':']
@@ -47,7 +74,7 @@ class Plotter:
         vis_y = result[:, 1]
 
         indices = np.argwhere(np.abs(result[:, 0]) < 10)
-        indices = indices.reshape(indices.shape[0]) 
+        indices = indices.reshape(indices.shape[0])
         result = result[indices, :]
         labels = labels[indices]
 

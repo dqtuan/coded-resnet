@@ -3,22 +3,20 @@
 	Supervised tasks
 """
 from init_fusionnet import *
-from fusionnet.pix2pix import Pix2PixModel
+from fusionnet.unet import UnetModel
 from torch.utils.tensorboard import SummaryWriter
 
-args.fnet_name = "{}_{}_{}_{}_{}".format(args.dataset, args.name, args.nactors, args.gan_mode, args.reduction)
+args.fnet_name = "unet_{}_{}_{}_{}_{}".format(args.dataset, args.name, args.nactors, args.gan_mode, args.reduction)
 
 writer = SummaryWriter('../results/runs/' + args.fnet_name)
+
 #defaults
-# args.input_nc = args.input_nc * args.nactors
 args.norm='batch'
 args.dataset_mode='aligned'
 args.gpu_ids = [0]
 args.pool_size=0
-args.lambda_L1 = args.lamb
 
-
-fnet = Pix2PixModel(args)
+fnet = UnetModel(args)
 fnet.setup(args)              # regular setup: load and print networks; create schedulers
 
 init_epoch = int(args.resume_g)
@@ -40,13 +38,10 @@ for epoch in range(1 + init_epoch, args.epochs + 1 + init_epoch):
 
 		if batch_idx % args.log_steps == 0:
 			losses = fnet.get_current_losses()
-			print("===> Epoch[{}]({}/{}): D-real: {:.4f} D-fake: {:.4f} G-GAN: {:.4f} G-L1 {:.4f}".format(
-			epoch, batch_idx, total_steps, losses['D_real'], losses['D_fake'], losses['G_GAN'], losses['G_L1']/args.lambda_L1))
+			print("===> Epoch[{}]({}/{}): G-L1 {:.4f}".format(
+			epoch, batch_idx, total_steps,  losses['G_L1']))
 
-	writer.add_scalar('L1 loss', losses['G_L1']/args.lambda_L1, epoch)
-	writer.add_scalar('GAN loss', losses['G_GAN'], epoch)
-	writer.add_scalar('D-real', losses['D_real'], epoch)
-	writer.add_scalar('D-fake', losses['D_fake'], epoch)
+	writer.add_scalar('L1 loss', losses['G_L1'], epoch)
 	#checkpoint
 	if (epoch - 1) % args.save_steps == 0 or epoch == args.epochs + init_epoch:
 		print('saving the latest fnet (epoch %d, total_iters %d)' % (epoch, total_steps))

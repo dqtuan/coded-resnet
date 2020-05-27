@@ -2,27 +2,33 @@
 	Doing fusion 2 images to match target images
 	Supervised tasks
 """
+from init_invnet import *
 from init_fusionnet import *
+from invnet.fresnet import conv_iResNet as fResNet
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter('../results/runs/sleepnet')
 
-if args.concat_input:
-	ninputs = 1
-	args.input_nc = args.input_nc * args.nactors
-else:
-	ninputs = args.nactors
+writer = SummaryWriter('../results/runs/fashion_mnist_experiment_1')
 
-# define fnet
-fnet = define_G(
-		input_nc=args.input_nc,
-		output_nc=args.output_nc,
-		nactors=ninputs,
-		ngf=args.ngf,
-		norm='batch',
-		use_dropout=False,
-		init_type='normal',
-		init_gain=0.02,
-		gpu_id=device)
+fnet = fResNet(nBlocks=args.nBlocks,
+				nStrides=args.nStrides,
+				nChannels=args.nChannels,
+				nClasses=10,
+				init_ds=args.init_ds,
+				inj_pad=args.inj_pad,
+				in_shape=in_shape,
+				nactors=args.nactors,
+				input_nc=args.input_nc,
+				coeff=args.coeff,
+				numTraceSamples=args.numTraceSamples,
+				numSeriesTerms=args.numSeriesTerms,
+				n_power_iter = args.powerIterSpectralNorm,
+				density_estimation=args.densityEstimation,
+				actnorm=(not args.noActnorm),
+				learn_prior=(not args.fixedPrior),
+				nonlin=args.nonlin).to(device)
+
+
+fnet = torch.nn.DataParallel(fnet, range(torch.cuda.device_count()))
 
 if os.path.isfile(fnet_path):
 	print("-- Loading checkpoint '{}'".format(fnet_path))
@@ -44,16 +50,17 @@ for epoch in range(1, num_epochs + 1):
 		# [-2.7; 2.3]
 		inputs = batch_data[:, :-1, ...]
 		inputs = inputs[:, torch.randperm(args.nactors), ...]
-
-		if 1 == ninputs:
-			# concat input
-			inputs = inputs.permute(0, 2, 1, 3, 4)
+		N, A, C, H, W = inputs.shape
+		inputs = inputs.view(N, A * C, H, W)
+		# if 1 == ninputs:
+		# 	# concat input
+		# 	inputs = inputs.permute(0, 2, 1, 3, 4)
 		# [-30; 30]
 		targets = batch_data[:, -1, ...]
 		optim_fnet.zero_grad()
 		# [-2.3, 2.3]
-		preds = fnet(inputs)
-		loss = criterionMSE(preds, targets) / args.batch_size
+		preds = fnet(inputs).view(targets.shape)
+		loss = criterionMSE(preds, targets)/args.batch_size
 		loss.backward()
 		optim_fnet.step()
 
@@ -69,6 +76,7 @@ for epoch in range(1, num_epochs + 1):
 		fnet_path = os.path.join(checkpoint_dir, '{}/{}_{}_e{}.pth'.format(root, root, args.model_name, args.resume_g + epoch))
 		torch.save(fnet.state_dict(), fnet_path)
 		# Helper.save_images(targets, sample_dir, args.model_name, 'target', epoch)
+
 		# Helper.save_images(preds, sample_dir, args.model_name, 'pred', epoch)
 		# evaluate classification
 		# Tester.evaluate_fnet(inet, fnet, dataloader, stats)

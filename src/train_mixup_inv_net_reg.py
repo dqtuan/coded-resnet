@@ -6,12 +6,11 @@
 from init_invnet import *
 from torch.utils.tensorboard import SummaryWriter
 
-args.inet_name = "inet_{}_{}".format(args.dataset, args.name)
+args.inet_name = "inet_reg_{}_{}".format(args.dataset, args.name)
 args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
 Helper.try_make_dir(args.inet_save_dir)
 
 writer = SummaryWriter('../results/runs/' + args.inet_name)
-
 inet = iResNet(nBlocks=args.nBlocks,
 				nStrides=args.nStrides,
 				nChannels=args.nChannels,
@@ -45,6 +44,10 @@ if args.resume > 0:
 	else:
 		print("--- No checkpoint found at '{}'".format(inet_path))
 		sys.exit('Done')
+else:
+	print('Load base model')
+	inet_path = os.path.join(args.inet_save_dir, 'inet_{}_base.pth'.format(args.dataset))
+	inet.load_state_dict(torch.load(inet_path))
 
 in_shapes = inet.module.get_in_shapes()
 if args.optimizer == "adam":
@@ -84,8 +87,11 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 		inputs = Variable(inputs, requires_grad=True).cuda()
 		targets = Variable(targets).cuda()
 
-		logits, _, reweighted_target = inet(inputs, targets=targets, mixup_hidden=args.mixup_hidden, mixup=args.mixup, mixup_alpha=args.mixup_alpha)
-		loss = bce_loss(softmax(logits), reweighted_target)
+		logits, z, reweighted_target = inet(inputs, targets=targets, mixup_hidden=args.mixup_hidden, mixup=args.mixup, mixup_alpha=args.mixup_alpha)
+		norms = torch.norm(z.view(z.shape[0], -1), dim=1)
+		l_norm = (torch.max(norms) - torch.min(norms))/1024
+		l_bce = bce_loss(softmax(logits), reweighted_target)
+		loss = args.lamb * l_bce + l_norm
 
 		# measure accuracy and record loss
 		_, labels = torch.max(reweighted_target.data, 1)
@@ -99,9 +105,9 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 		optimizer.step()
 		if batch_idx % args.log_steps == 0:
 			sys.stdout.write('\r')
-			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f Acc@5: %.3f'
+			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f l_norm: %.4f  l_bce: %.4f Acc@1: %.3f Acc@5: %.3f'
 						 % (epoch, args.epochs, batch_idx+1,
-							(len(trainset)//args.batch_size)+1, loss.data.item(),
+							(len(trainset)//args.batch_size)+1, loss.data.item(), l_norm.data.item(), l_bce.data.item(),
 							top1.avg, top5.avg))
 			sys.stdout.flush()
 
@@ -109,7 +115,10 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 	epoch_time = time.time() - start_time
 	elapsed_time += epoch_time
 	print('| Elapsed time : %d:%02d:%02d' % (Helper.get_hms(elapsed_time)))
-	writer.add_scalar('train_loss', loss, epoch)
+
+	writer.add_scalar('Norm', l_norm, epoch)
+	writer.add_scalar('BCE', l_bce, epoch)
+	writer.add_scalar('loss', loss, epoch)
 
 	if (epoch - 1) % args.save_steps == 0 or epoch == init_epoch + args.epochs:
 		# evaluate
@@ -118,5 +127,4 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 		#save
 		Helper.save_networks(inet, args.inet_save_dir, epoch)
 
-########################## Store ##################
 print('Done')

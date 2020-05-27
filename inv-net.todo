@@ -36,6 +36,19 @@ watch -n 1 cat
   ☐ MNIST 4 actors:
     ☐ Vanilla: not working
     ☐ Focus on mix-hidden: improve 57% => understand where the issues come from to improve
-    ☐ unite 2 configs 
+    ☐ unite 2 configs
   ☐ logs the system every training
   ☐ save only important checkpoints
+
+04/07/2020:
+  ✔ CIFAR10 vanilla: ds=1, update learning rate @done(2020-04-07 11:05) @project(04/07/2020)
+  ☐ CIFAR10 mixup with same setting: 92% accuracy = good
+  ☐ Fusion on CIFAR10 with distillation
+  ☐ MSE check - invertibility
+  ☐ Verify claims: X is easier than Z, smaller network, multiple Zs to have same logits (cyclic)
+
+04/21/2020:
+  ☐ Freezing on Fashion:
+    ☐ Reorgainize the c
+  ☐ Explore other options for solving f:
+    ☐ Find conditions on G or F to make it work

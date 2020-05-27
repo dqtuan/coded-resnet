@@ -106,6 +106,17 @@ class Helper:
 		# 	'epoch': epoch,
 		# }
 		# torch.save(state, net_path)
+	@staticmethod
+	def save_networks(net, save_dir, epoch):
+		"""Save all the networks to the disk.
+
+		Parameters:
+			epoch (int) -- current epoch; used in the file name '%s_net_%s.pth' % (epoch, name)
+		"""
+		save_filename = '%s_net.pth' % (epoch)
+		save_path = os.path.join(save_dir, save_filename)
+		torch.save(net.state_dict(), save_path)
+		print('Save model ', save_filename)
 
 	#iresnet
 	@staticmethod
@@ -117,6 +128,8 @@ class Helper:
 			optim_factor = 2
 		elif epoch > 60:
 			optim_factor = 1
+
+		# optim_factor = epoch // 30
 		return init*math.pow(0.2, optim_factor)
 
 	@staticmethod

@@ -4,49 +4,22 @@
 """
 
 from init_invnet import *
-from torch.utils.tensorboard import SummaryWriter
+from invnet.resnet import ResNet, BasicBlock
 
-args.inet_name = "inet_{}_{}".format(args.dataset, args.name)
-args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
-Helper.try_make_dir(args.inet_save_dir)
+if args.input_nc == 1:
+	nblocks = [5, 5, 5]
+else:
+	nblocks = [9, 9, 9]
 
-writer = SummaryWriter('../results/runs/' + args.inet_name)
+inet = torch.nn.DataParallel(ResNet(BasicBlock, nblocks, input_nc=args.input_nc)).to(device)
 
-inet = iResNet(nBlocks=args.nBlocks,
-				nStrides=args.nStrides,
-				nChannels=args.nChannels,
-				nClasses=args.nClasses,
-				init_ds=args.init_ds,
-				inj_pad=args.inj_pad,
-				in_shape=in_shape,
-				coeff=args.coeff,
-				numTraceSamples=args.numTraceSamples,
-				numSeriesTerms=args.numSeriesTerms,
-				n_power_iter = args.powerIterSpectralNorm,
-				density_estimation=args.densityEstimation,
-				actnorm=(not args.noActnorm),
-				learn_prior=(not args.fixedPrior),
-				nonlin=args.nonlin).to(device)
+if os.path.isfile(inet_path):
+	print("-- Loading checkpoint '{}'".format(inet_path))
+	inet.load_state_dict(torch.load(inet_path))
+else:
+	print("--- No checkpoint found at '{}'".format(inet_path))
+	args.resume = 0
 
-
-init_batch = Helper.get_init_batch(trainloader, args.init_batch)
-print("initializing actnorm parameters...")
-with torch.no_grad():
-	inet(init_batch.to(device), ignore_logdet=True)
-print("initialized")
-inet = torch.nn.DataParallel(inet, range(torch.cuda.device_count()))
-
-if args.resume > 0:
-	save_filename = '%s_net.pth' % (args.resume)
-	inet_path = os.path.join(args.inet_save_dir, save_filename)
-	if os.path.isfile(inet_path):
-		print("-- Loading checkpoint '{}'".format(inet_path))
-		inet.load_state_dict(torch.load(inet_path))
-	else:
-		print("--- No checkpoint found at '{}'".format(inet_path))
-		sys.exit('Done')
-
-in_shapes = inet.module.get_in_shapes()
 if args.optimizer == "adam":
 	optimizer = optim.Adam(inet.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 else:
@@ -55,7 +28,7 @@ else:
 
 scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 ##### Analysis ######
-if analyse(args, inet, in_shapes, trainloader, testloader):
+if analyse(args, inet, in_shape, trainloader, testloader):
 	sys.exit('Done')
 
 ##### Training ######
@@ -87,7 +60,6 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 		logits, _, reweighted_target = inet(inputs, targets=targets, mixup_hidden=args.mixup_hidden, mixup=args.mixup, mixup_alpha=args.mixup_alpha)
 		loss = bce_loss(softmax(logits), reweighted_target)
 
-		# measure accuracy and record loss
 		_, labels = torch.max(reweighted_target.data, 1)
 		prec1, prec5 = Helper.accuracy(logits, labels, topk=(1, 5))
 		losses.update(loss.item(), inputs.size(0))
@@ -109,14 +81,11 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 	epoch_time = time.time() - start_time
 	elapsed_time += epoch_time
 	print('| Elapsed time : %d:%02d:%02d' % (Helper.get_hms(elapsed_time)))
-	writer.add_scalar('train_loss', loss, epoch)
 
-	if (epoch - 1) % args.save_steps == 0 or epoch == init_epoch + args.epochs:
-		# evaluate
-		print("Evaluating on Testset")
-		Tester.evaluate(inet, testloader)
-		#save
-		Helper.save_networks(inet, args.inet_save_dir, epoch)
+	if (epoch - 1) % args.save_steps == 0:
+		model_name = '{}_{}'.format(root, args.model_name)
+		Helper.save_checkpoint(inet, test_objective, checkpoint_dir, model_name, epoch)
 
 ########################## Store ##################
+Helper.save_checkpoint(inet, test_objective, checkpoint_dir, args.model_name, args.epochs)
 print('Done')

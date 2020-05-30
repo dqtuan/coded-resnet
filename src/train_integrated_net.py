@@ -20,7 +20,7 @@ def loss_fn_kd(outputs, labels, teacher_outputs, alpha, temperature):
 	"""
 	T = temperature # small T for small network student
 	beta = (1. - alpha) * T * T # alpha for student: small alpha is better
-	teacher_loss = nn.KLDivLoss()(F.log_softmax(outputs/T, dim=1),
+	teacher_loss = criterionKLD(F.log_softmax(outputs/T, dim=1),
 							 F.softmax(teacher_outputs/T, dim=1))
 	# student_loss = F.cross_entropy(outputs, labels)
 	student_loss = bce_loss(softmax(outputs), labels)
@@ -130,12 +130,10 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 		# 	from IPython import embed; embed()
 		# inet loss
 		loss_distill = loss_fn_kd(out_hat, target_reweighted, out, alpha=0.1, temperature=6)
+		loss_xl1 = criterionL1(x_fused_g, x_fused)
+		loss_tl1 = criterionL1(torch.tanh(x_fused_g), torch.tanh(x_fused))
 
-		loss_l1 = criterionL1(x_fused_g, x_fused)
-
-		loss = loss_distill  + args.lambda_L1 * loss_l1
-
-
+		loss = loss_distill * args.lamb  #+ args.lambda_L1 * loss_l1
 		# measure accuracy and record loss
 		_, labels = torch.max(target_reweighted.data, 1)
 		prec1, prec5 = Helper.accuracy(out_hat, labels, topk=(1, 5))
@@ -151,17 +149,17 @@ for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 			# print(out_hat)
 			# print(target_reweighted)
 			sys.stdout.write('\r')
-			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f Acc@5: %.3f Distill: %.3f L1: %.3f'
+			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f Acc@5: %.3f Distill: %.3f L1: %.3f Tanh-L1: %.3f\n'
 						 % (epoch, args.epochs, batch_idx+1,
 							(len(trainset)//args.batch_size)+1, loss.data.item(),
-							top1.avg, top5.avg, loss_distill.item(), loss_l1.item()))
+							top1.avg, top5.avg, loss_distill.item(), loss_xl1.item(), loss_tl1.item()))
 			sys.stdout.flush()
 
 	epoch_time = time.time() - start_time
 	elapsed_time += epoch_time
 	print('| Elapsed time : %d:%02d:%02d' % (Helper.get_hms(elapsed_time)))
 	writer.add_scalar('train_loss', loss, epoch)
-	writer.add_scalar('train_l1', loss, epoch)
+	writer.add_scalar('train_l1', loss_xl1, epoch)
 
 	fnet_scheduler.step()
 	lr = optim_fnet.param_groups[0]['lr']

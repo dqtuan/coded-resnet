@@ -111,9 +111,9 @@ def batch_process(inet, fnet, inputs, targets, nactors):
 	inputs = inputs[:N, ...].view(M, A, C, H, W)
 	targets = targets[:N, ...].view(M, A)
 
-	# indices = torch.randperm(A)
-	# inputs = inputs[:, indices, ...]
-	# targets = targets[:, indices]
+	indices = torch.randperm(A)
+	inputs = inputs[:, indices, ...]
+	targets = targets[:, indices]
 	# fusion inputs
 	x_g = inputs.view(M, A*C, H, W)
 	x_fused_g = rescale(fnet(x_g))

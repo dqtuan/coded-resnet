@@ -66,6 +66,7 @@ bce_loss = nn.BCELoss()
 softmax = nn.Softmax(dim=1)
 criterionCE = nn.CrossEntropyLoss()
 criterionL1 = nn.L1Loss()
+criterionKLD = nn.KLDivLoss()
 
 ########## # Evaluation ####################
 def analyse(args, model, in_shapes, trainloader, testloader):

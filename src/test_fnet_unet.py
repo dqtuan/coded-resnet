@@ -7,7 +7,7 @@ from fusionnet.unet import UnetModel
 from invnet.iresnet import conv_iResNet as iResNet
 from utils.provider import Provider
 
-in_shape = (1, 32, 32)
+in_shape = (3, 32, 32)
 trainset, testset, in_shape = Provider.load_data(args.dataset, args.data_dir)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=2)

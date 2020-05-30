@@ -11,7 +11,9 @@ parser = argparse.ArgumentParser(description='Train ifnet')
 ## paths
 parser.add_argument('--isTrain', action='store_false')
 
-parser.add_argument('--name', default='model', type=str, help='dataset')
+parser.add_argument('--iname', default='mixup', type=str, help='dataset')
+parser.add_argument('--fname', default='pix2pix', type=str, help='dataset')
+
 parser.add_argument('--dataset', default='cifar10', type=str, help='dataset')
 parser.add_argument('--data_dir', default='../data/')
 parser.add_argument('--save_dir', default='../results',
@@ -148,8 +150,9 @@ parser.add_argument('-deterministic', '--deterministic', dest='deterministic', a
 parser.add_argument('--extension', default='.npy', type=str, help='extension')
 
 ###-------------- fnet ----------------####
-parser.add_argument('--lamb', type=float, default=10, help='weight on L1 term in objective')
-
+parser.add_argument('--lamb', type=float, default=100, help='weight on L1 term in objective')
+parser.add_argument('--lambda_distill', type=float, default=100, help='weight on L1 term in objective')
+parser.add_argument('--lambda_L1', type=float, default=100, help='weight on L1 term in objective')
 
 ### Pix2PixModel
 """Define the common options that are used in both training and test."""
@@ -170,7 +173,7 @@ parser.add_argument('--init_type', type=str, default='normal', help='network ini
 parser.add_argument('--init_gain', type=float, default=0.02, help='scaling factor for normal, xavier and orthogonal.')
 parser.add_argument('--no_dropout', action='store_true', help='no dropout for the generator')
 # dataset parameters
-parser.add_argument('--dataset_mode', type=str, default='unaligned', help='chooses how datasets are loaded. [unaligned | aligned | single | colorization]')
+parser.add_argument('--dataset_mode', type=str, default='aligned', help='chooses how datasets are loaded. [unaligned | aligned | single | colorization]')
 parser.add_argument('--direction', type=str, default='AtoB', help='AtoB or BtoA')
 parser.add_argument('--serial_batches', action='store_true', help='if true, takes images in order to make batches, otherwise takes them randomly')
 parser.add_argument('--num_threads', default=4, type=int, help='# threads for loading data')

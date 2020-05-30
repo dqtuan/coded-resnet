@@ -24,35 +24,29 @@ cudnn.benchmark = True
 torch.cuda.manual_seed(args.seed)
 device = torch.device("cuda:0")
 
-# define paths
-root = 'fnet'
-
-args.fnet_name = "{}_{}_{}_{}".format(args.dataset, args.name, args.nactors, args.gan_mode)
+args.fnet_name = "fnet_{}_{}_{}_{}".format(args.fname, args.dataset, args.iname, args.nactors)
+args.inet_name = "inet_{}_{}".format(args.dataset, args.iname)
 
 checkpoint_dir = os.path.join(args.save_dir, 'checkpoints')
-sample_dir = os.path.join(args.save_dir, 'samples/{}'.format(root))
-fnet_path = os.path.join(checkpoint_dir, '{}/{}_{}_e{}.pth'.format(root, root, args.fnet_name, args.resume_g))
-
+args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
+args.fnet_save_dir = os.path.join(checkpoint_dir, args.fnet_name)
 Helper.try_make_dir(args.save_dir)
 Helper.try_make_dir(checkpoint_dir)
-Helper.try_make_dir(sample_dir)
+Helper.try_make_dir(args.fnet_save_dir)
+Helper.try_make_dir(args.inet_save_dir)
 
-############ Data ##############
-data_dir = os.path.join(args.data_dir, root)
 if args.dataset == 'cifar10':
-    if args.name == 'vanilla':
-        data_name = 'vanilla'
-    else:
-        data_name = 'mixup'
     args.input_nc = 3
     args.output_nc = 3
+	in_shape = (3, 32, 32)
 else:
-    data_name = 'mixup_hidden'
     args.input_nc = 1
     args.output_nc = 1
-train_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_train.npy".format(args.dataset, data_name, args.nactors, args.reduction))
-test_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_test.npy".format(args.dataset, data_name, args.nactors, args.reduction))
-val_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_val.npy".format(args.dataset, data_name, args.nactors, args.reduction))
+    in_shape = (1, 32, 32)
+
+train_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_train.npy".format(args.dataset, args.iname, args.nactors, args.reduction))
+test_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_test.npy".format(args.dataset, args.iname, args.nactors, args.reduction))
+val_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_val.npy".format(args.dataset, args.iname, args.nactors, args.reduction))
 train_dataset = FusionDataset(train_path)
 test_dataset = FusionDataset(test_path)
 val_dataset = FusionDataset(val_path)

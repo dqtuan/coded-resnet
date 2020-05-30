@@ -6,10 +6,6 @@
 from init_invnet import *
 from torch.utils.tensorboard import SummaryWriter
 
-args.inet_name = "inet_{}_{}".format(args.dataset, args.name)
-args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
-Helper.try_make_dir(args.inet_save_dir)
-
 writer = SummaryWriter('../results/runs/' + args.inet_name)
 
 inet = iResNet(nBlocks=args.nBlocks,
@@ -28,7 +24,6 @@ inet = iResNet(nBlocks=args.nBlocks,
 				learn_prior=(not args.fixedPrior),
 				nonlin=args.nonlin).to(device)
 
-
 init_batch = Helper.get_init_batch(trainloader, args.init_batch)
 print("initializing actnorm parameters...")
 with torch.no_grad():
@@ -46,7 +41,13 @@ if args.resume > 0:
 		print("--- No checkpoint found at '{}'".format(inet_path))
 		sys.exit('Done')
 
+####################### Analysis ##############################
 in_shapes = inet.module.get_in_shapes()
+if analyse(args, inet, in_shapes, trainloader, testloader):
+	sys.exit('Done')
+
+
+####################### Training ##############################
 if args.optimizer == "adam":
 	optimizer = optim.Adam(inet.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 else:
@@ -54,11 +55,8 @@ else:
 						  momentum=0.9, weight_decay=args.weight_decay, nesterov=args.nesterov)
 
 scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-##### Analysis ######
-if analyse(args, inet, in_shapes, trainloader, testloader):
-	sys.exit('Done')
 
-##### Training ######
+
 print('|  Train: mixup: {} mixup_hidden {} alpha {} epochs {}'.format(args.mixup, args.mixup_hidden, args.mixup_alpha, args.epochs))
 print('|  Initial Learning Rate: ' + str(args.lr))
 elapsed_time = 0

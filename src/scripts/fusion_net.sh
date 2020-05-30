@@ -40,13 +40,13 @@ resume_g=100
 dataset='cifar10'
 nactors=2
 ### train #####
-python ./train_fusion_gan_net.py --name mixup --dataset cifar10 --nactors 2 --resume_g 0 --resume 200 --lr 0.0002 --epochs 200 --n_epochs 50 --n_epochs_decay 150 --lr_policy linear --lamb 100 --no_dropout
+# python ./train_fusion_gan_net.py --name mixup --dataset cifar10 --nactors 2 --resume_g 391 --resume 200 --lr 0.00002 --epochs 200 --n_epochs 50 --n_epochs_decay 150 --lr_policy linear --lamb 100 --no_dropout
 # python ./train_fusion_gan_net.py --name vanilla --dataset cifar10 --nactors 2 --resume_g 0 --resume 200 --lr 0.0002 --epochs 100 --n_epochs 30 --n_epochs_decay 80 --lr_policy linear --lamb 100
 # python ./train_fnet_unet.py --name $name --dataset $dataset --nactors $nactors --resume_g 0 --lr 0.001 --epochs 100 --n_epochs 30 --n_epochs_decay 80 --lr_policy linear --reduction $reduction --no_dropout
 
 
 ### test #####
-python ./test_fusion_gan_net.py --name mixup --dataset cifar10 --nactors 2 --resume_g 200 --lamb 100 --resume 200 --no_dropout --flag_test
+python ./test_fusion_gan_net.py --name mixup --dataset cifar10 --nactors 2 --resume_g 391 --lamb 100 --resume 200 --no_dropout
 # python ./test_fusion_gan_net.py --name vanilla --dataset cifar10 --nactors 4 --resume_g 200 --resume 200 --lamb 100 --batch_size 128
 # python ./test_fusion_gan_net.py --name mixup --dataset cifar10 --nactors 2 --resume_g 200 --resume 200 --lamb 100 --batch_size 128
 # python ./test_fnet_unet.py --name $name --dataset $dataset --nactors $nactors --resume_g 100 --flag_test --batch_size 128 --no_dropout

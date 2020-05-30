@@ -7,7 +7,6 @@ from fusionnet.pix2pix import Pix2PixModel
 from invnet.iresnet import conv_iResNet as iResNet
 from utils.provider import Provider
 
-in_shape = (1, 32, 32)
 trainset, testset, in_shape = Provider.load_data(args.dataset, args.data_dir)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=2)
@@ -36,8 +35,6 @@ print("initialized")
 inet = torch.nn.DataParallel(inet, range(torch.cuda.device_count()))
 
 save_filename = '%s_net.pth' % (args.resume)
-args.inet_name = "inet_{}_{}".format(args.dataset, data_name)
-args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
 inet_path = os.path.join(args.inet_save_dir, save_filename)
 if os.path.isfile(inet_path):
 	print("-- Loading checkpoint '{}'".format(inet_path))
@@ -55,7 +52,6 @@ args.gpu_ids = [0]
 args.pool_size=0
 args.lambda_L1 = args.lamb
 
-args.fnet_name = "{}_{}_{}_{}_{}".format(args.dataset, args.name, args.nactors, args.gan_mode, args.reduction)
 fnet = Pix2PixModel(args)
 fnet.setup(args)              # regular setup: load and print networks; create schedulers
 init_epoch = int(args.resume_g)

@@ -9,6 +9,9 @@ import os, time, sys
 import numpy as np
 from utils.helper import Helper
 
+criterionMSE = nn.MSELoss(reduction='mean')
+criterionL1 = torch.nn.L1Loss(reduction='mean')
+
 def atanh(x):
 	return 0.5*torch.log((1+x)/(1-x))
 
@@ -96,7 +99,54 @@ def angle2cart(r, angles):
 	p = torch.cos(angles) * r
 	return p
 
-criterionMSE = nn.MSELoss(reduction='mean')
+
+def batch_process(inet, fnet, inputs, targets, nactors):
+	# counters
+	inputs = Variable(inputs).cuda()
+	targets = Variable(targets).cuda()
+	N, C, H, W = inputs.shape
+	A = nactors
+	M = N // A
+	N = M * A
+	inputs = inputs[:N, ...].view(M, A, C, H, W)
+	targets = targets[:N, ...].view(M, A)
+
+	# indices = torch.randperm(A)
+	# inputs = inputs[:, indices, ...]
+	# targets = targets[:, indices]
+	# fusion inputs
+	x_g = inputs.view(M, A*C, H, W)
+	x_fused_g = rescale(fnet(x_g))
+
+	# Z
+	_, z, _ = inet(inputs.view(M*A, C, H, W))
+	z = z.view((M, A, z.shape[1], z.shape[2], z.shape[3]))
+	# missed server
+	target_missed = targets[:, 0]
+	z_missed = z[:, 0, ...]
+	z_rest = z[:, 1:, ...].sum(dim=1)
+	z_fused = z.mean(dim=1)
+
+	_, z_fused_g, _ = inet(x_fused_g)
+	z_missed_g = A * z_fused_g - z_rest
+
+	return z_missed, z_missed_g, target_missed, z_fused
+
+def batch_score(inet, z_missed, z_missed_g, target_missed):
+	# classification
+	out_missed_g = inet.module.classifier(z_missed_g)
+	out_missed = inet.module.classifier(z_missed)
+
+	# evaluation
+	_, y = torch.max(out_missed.data, 1)
+	_, y_g = torch.max(out_missed_g.data, 1)
+
+	acc = y.eq(target_missed.data).sum().cpu().item()
+	acc_g = y_g.eq(target_missed.data).sum().cpu().item()
+	match_g = y_g.eq(y.data).sum().cpu().item()
+
+	return np.asarray([acc, acc_g, match_g])
+
 
 class Tester:
 	@staticmethod
@@ -116,6 +166,237 @@ class Tester:
 			top5.update(prec5.item(), inputs.size(0))
 
 		sys.stdout.write('Acc@1: %.3f Acc@5: %.3f' % (top1.avg, top5.avg))
+
+	@staticmethod
+	def evaluate_fgan(inet, fnet, dataloader, nactors):
+		print('Evaluate Fusion Network')
+		inet.eval()
+		fnet.eval()
+		ntests = 0
+		corrects = np.zeros(3)
+		for batch_idx, (inputs, targets) in enumerate(dataloader):
+			z_missed, z_missed_g, target_missed, _ = batch_process(inet, fnet, inputs, targets, nactors)
+			s = batch_score(inet, z_missed, z_missed_g, target_missed)
+			corrects += s
+			ntests += z_missed.shape[0]
+
+			del z_missed, z_missed_g, target_missed, _
+
+		corrects = 100 * corrects / ntests
+		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
+
+	@staticmethod
+	def evaluate_fnet(inet, fnet, dataloader, stats, nactors, nchannels=3, targets=None, concat_input=False):
+		print('Evaluate fusion network')
+		inet.eval()
+		fnet.eval()
+
+		total = 0
+		nbatches = 0
+		corrects = [0, 0, 0]
+		runtimes = [0, 0, 0]
+		for batch_idx, (inputs, targets) in enumerate(dataloader):
+			# data
+			targets = Variable(targets).cuda()
+			inputs = Variable(inputs).cuda()
+			# counters
+			batch_size, C, H, W = inputs.shape
+			nbatches += 1
+			total += batch_size
+
+			# clone inputs (N-1) times
+			x = scale(inputs.clone(), stats).unsqueeze(0).expand(nactors - 1, batch_size, C, H, W).contiguous().view((nactors-1)*batch_size, C, H, W)
+			# shuffle samples
+			x = x[torch.randperm(x.shape[0]), ...]
+
+			# latents
+			_, z_c, _ = inet(x)
+			z_c = z_c.view(nactors - 1, batch_size, z_c.shape[1], z_c.shape[2], z_c.shape[3]).sum(dim=0)
+
+			# fusion inputs
+			x_g = torch.cat([scale(inputs.clone(), stats).unsqueeze(1), x.view(nactors - 1, batch_size, C, H, W).permute(1, 0, 2, 3, 4)], dim=1)
+
+			start_time = time.time()
+			if concat_input:
+				x_g = x_g.permute(0, 2, 1, 3, 4)
+
+			# N, A, C, H, W = x_g.shape
+			# x_g = x_g.view(N, A * C, H, W)
+			img_fused = fnet(x_g)
+			# img_fused = img_fused.view(inputs.shape)
+			# img_fused = fnet(x_g)
+			img_fused = rescale(img_fused.clone(), stats)
+			runtimes[0] += time.time() - start_time
+
+			# time f
+			start_time = time.time()
+			_, z_fused, _ = inet(img_fused)
+			runtimes[1] += time.time() - start_time
+
+			start_time = time.time()
+			z_hat = nactors * z_fused - z_c
+			out_hat = inet.module.classifier(z_hat)
+			runtimes[2] += time.time() - start_time
+
+			out, _, _ = inet(inputs)
+			_, y = torch.max(out.data, 1)
+			_, y_hat = torch.max(out_hat.data, 1)
+
+			corrects[0] += y.eq(targets.data).sum().cpu().item()
+			corrects[1] += y_hat.eq(targets.data).sum().cpu().item()
+			corrects[2] += y_hat.eq(y.data).sum().cpu().item()
+
+			del _, z_c, z_hat, z_fused, inputs, targets, img_fused, out, out_hat, y, y_hat
+
+		# Evaluate time and classification performance
+		corrects = 100 * np.asarray(corrects) / total
+		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
+		runtimes = np.asarray(runtimes)/ nbatches
+		print('Average time G: {:.4f}, E: {:.4f}, C: {:.4f} over {} batches of size {}'.format(runtimes[0], runtimes[1], runtimes[2], nbatches, batch_size))
+
+	@staticmethod
+	def evaluate_fnet_multiround(inet, fnet, dataloader, nactors, nchannels=3, targets=None, concat_input=False):
+		print('Evaluate fusion network')
+		inet.eval()
+		fnet.eval()
+		total = 0
+		nbatches = 0
+		corrects = [0, 0, 0]
+		runtimes = [0, 0, 0]
+		sum_mae = 0
+		sum_mse = 0
+		criterionMSE = nn.MSELoss(reduction='mean')
+		for batch_idx, (inputs, targets) in enumerate(dataloader):
+			nbatches += 1
+			targets = Variable(targets).cuda()
+			inputs = Variable(inputs).cuda()
+			batch_size, C, H, W = inputs.shape
+			total += batch_size
+
+			x = inputs.unsqueeze(0).expand(nactors, batch_size, C, H, W).contiguous().view(nactors*batch_size, C, H, W)
+			x = x[torch.randperm(x.shape[0]), ...]
+
+			_, z_c, _ = inet(x)
+			z_c = z_c.view(nactors, batch_size, z_c.shape[1], z_c.shape[2], z_c.shape[3])
+			sum_z = z_c.sum(dim=0)
+
+			x = x.view(nactors, batch_size, C, H, W)
+			x_g = x[torch.randperm(nactors), ...].permute(1, 0, 2, 3, 4)
+			img_fused = fnet(x_g)
+			_, z_fused, _ = inet(img_fused)
+
+			for k in range(nactors):
+				z = sum_z - z_c[k, ...]
+				z_hat = nactors * z_fused - z
+				out_hat = inet.module.classifier(z_hat)
+
+				inputs = x[k, ...]
+				out, _, _ = inet(inputs)
+				_, y = torch.max(out.data, 1)
+				_, y_hat = torch.max(out_hat.data, 1)
+
+				corrects[2] += y_hat.eq(y.data).sum().cpu().item()/nactors
+
+				input_hat = inet.module.inverse(z_hat)
+				mae = torch.norm((input_hat - inputs).view(batch_size, -1), dim=1) / torch.norm(inputs.view(batch_size, -1), dim=1)
+				sum_mae += mae.mean().cpu().item()/nactors
+
+				sum_mse += criterionMSE(input_hat, inputs).mean().cpu().item() /nactors
+
+				max = inputs.abs().max().cpu().item()
+				min = (input_hat - inputs).abs().max().cpu().item()
+
+			del _, z_c, z_hat, z_fused, inputs, targets, img_fused, out, out_hat, y, y_hat
+
+		# Evaluate time and classification performance
+		corrects = 100 * np.asarray(corrects) / (total)
+		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
+
+		print('\t == MAE: {:.4f}, MSE: {:.4f} in {:.4f} -> {:.4f}'.format(sum_mae/nbatches, sum_mse/nbatches, min, max))
+
+		runtimes = np.asarray(runtimes)/ nbatches
+		print('Average time G: {:.4f}, E: {:.4f}, C: {:.4f} over {} batches of size {}'.format(runtimes[0], runtimes[1], runtimes[2], nbatches, batch_size))
+
+	@staticmethod
+	def evaluate_fnet_distill(inet, fnet, dataloader, nactors, nchannels=3, targets=None, concat_input=False):
+		print('Evaluate fusion network')
+		inet.eval()
+		fnet.eval()
+
+		total = 0
+		nbatches = 0
+		corrects = [0, 0, 0]
+		runtimes = [0, 0, 0]
+		sum_mae = 0
+		sum_mse = 0
+		for batch_idx, (inputs, targets) in enumerate(dataloader):
+			nbatches += 1
+
+			targets = Variable(targets).cuda()
+			inputs = Variable(inputs).cuda()
+			batch_size, C, H, W = inputs.shape
+			total += batch_size
+
+			x = inputs.unsqueeze(0).expand(nactors - 1, batch_size, C, H, W).contiguous().view((nactors-1)*batch_size, C, H, W)
+			x = x[torch.randperm(x.shape[0]), ...]
+
+			_, z_c, _ = inet(x)
+			z_c = z_c.view(nactors - 1, batch_size, z_c.shape[1], z_c.shape[2], z_c.shape[3]).sum(dim=0)
+
+			x_g = torch.cat([inputs.unsqueeze(1), x.view(nactors - 1, batch_size, C, H, W).permute(1, 0, 2, 3, 4)], dim=1)
+
+			start_time = time.time()
+			if concat_input:
+				x_g = x_g.permute(0, 2, 1, 3, 4)
+
+			# randomly permute batch_size
+			x_g = x_g[:, torch.randperm(nactors), ...]
+			# new
+			N, A, C, H, W = x_g.shape
+			x_g = x_g.view(N, A * C, H, W)
+			img_fused = fnet(x_g)
+			img_fused = fnet(img_fused).view(inputs.shape)
+			runtimes[0] += time.time() - start_time
+
+			# time f
+			start_time = time.time()
+			_, z_fused, _ = inet(img_fused)
+			runtimes[1] += time.time() - start_time
+
+			start_time = time.time()
+			z_hat = nactors * z_fused - z_c
+			out_hat = inet.module.classifier(z_hat)
+			runtimes[2] += time.time() - start_time
+
+			out, z, _ = inet(inputs)
+			_, y = torch.max(out.data, 1)
+			_, y_hat = torch.max(out_hat.data, 1)
+
+			corrects[0] += y.eq(targets.data).sum().cpu().item()
+			corrects[1] += y_hat.eq(targets.data).sum().cpu().item()
+			corrects[2] += y_hat.eq(y.data).sum().cpu().item()
+
+			del _, z_c, z_fused, inputs, targets, img_fused, out, out_hat, y, y_hat
+
+		# input_hat = inet.module.inverse(z_hat)
+		mae = torch.norm((z_hat - z).view(batch_size, -1), dim=1) / torch.norm(z.view(batch_size, -1), dim=1)
+		sum_mae = mae.mean().cpu().item()
+		sum_mse = criterionMSE(z_hat, z).mean().cpu().item()
+
+		mean = (z_hat - z).abs().mean().cpu().item()
+		median = (z_hat - z).abs().median().cpu().item()
+		min = z.abs().mean().cpu().item()
+		max = z.abs().median().cpu().item()
+
+		# Evaluate time and classification performance
+		corrects = 100 * np.asarray(corrects) / total
+		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
+
+		print('\t == MAE: {:.4f}, MSE: {:.4f} Mean {:.4f}, Median {:.4f}, Z-Range {:.4f} {:.4f}'.format(sum_mae, sum_mse, mean, median, min, max))
+
+		runtimes = np.asarray(runtimes)/ nbatches
+		print('Average time G: {:.4f}, E: {:.4f}, C: {:.4f} over {} batches of size {}'.format(runtimes[0], runtimes[1], runtimes[2], nbatches, batch_size))
+
 
 	@staticmethod
 	def plot_fused_images(model_name, sample_path, inet, dataloader, nactors, concat_input=False):
@@ -221,284 +502,6 @@ class Tester:
 		print("L1: {:.4f}".format(criterionL1(torch.tanh(x_fused_g), torch.tanh(x_fused))))
 		print(np.asarray(corrects)/M)
 
-	@staticmethod
-	def evaluate_fgan(inet, fnet, dataloader, stats, nactors, nchannels=3, targets=None, concat_input=False):
-		print('Evaluate fusion network')
-		inet.eval()
-		fnet.eval()
-
-		ntests = 0
-		corrects = [0, 0, 0]
-		runtimes = [0, 0, 0]
-		criterionL1 = torch.nn.L1Loss(reduction='mean')
-		for batch_idx, (inputs, targets) in enumerate(dataloader):
-			inputs = Variable(inputs).cuda()
-			targets = Variable(targets).cuda()
-			# counters
-			inputs = Variable(inputs).cuda()
-			targets = Variable(targets).cuda()
-			N, C, H, W = inputs.shape
-
-			M = N // nactors
-			N = M * nactors
-			inputs = inputs[:N, ...].view(M, nactors, C, H, W)
-			targets = targets[:N, ...].view(M, nactors)
-
-			# fusion inputs
-			x_g = inputs.view(M, nactors*C, H, W)
-			x_fused_g = rescale(fnet(x_g))
-
-			# Z
-			_, z, _ = inet(inputs.view(M*nactors, C, H, W))
-			z = z.view((M, nactors, z.shape[1], z.shape[2], z.shape[3]))
-			target_missed = targets[:, 0]
-			z_missed = z[:, 0, ...]
-			z_rest = z[:, 1:, ...].sum(dim=1)
-			z_fused = z.mean(dim=1)
-			_, z_fused_g, _ = inet(x_fused_g)
-			z_missed_g = nactors * z_fused_g - z_rest
-
-			# classification
-			out_missed_g = inet.module.classifier(z_missed_g)
-			out_missed = inet.module.classifier(z_missed)
-
-			# evaluation
-			_, y = torch.max(out_missed.data, 1)
-			_, y_g = torch.max(out_missed_g.data, 1)
-
-			ntests += M
-			acc = y.eq(target_missed.data).sum().cpu().item()
-			acc_g = y_g.eq(target_missed.data).sum().cpu().item()
-			match_g = y_g.eq(y.data).sum().cpu().item()
-
-			# inverse
-			x_fused = inet.module.inverse(z_fused)
-			l1 = criterionL1(torch.tanh(x_fused_g), torch.tanh(x_fused))
-			# from IPython import embed; embed()
-
-			# print('\t == L1: {:.4f} X {:.4f} X_hat {:.4f} Match {:.4f}'.format(l1, acc/M, acc_g/M, match_g/M))
-
-			corrects[0] += acc
-			corrects[1] += acc_g
-			corrects[2] += match_g
-
-			del _, z, z_missed, z_rest, z_fused, z_fused_g, z_missed_g, inputs, targets, target_missed, out_missed, out_missed_g, y, y_g, x_g, x_fused_g
-
-		# Evaluate time and classification performance
-		corrects = 100 * np.asarray(corrects) / ntests
-		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
-
-	@staticmethod
-	def evaluate_fusion_net(inet, fnet, dataloader, stats, nactors, nchannels=3, targets=None, concat_input=False):
-		print('Evaluate fusion network')
-		inet.eval()
-		fnet.eval()
-
-		total = 0
-		nbatches = 0
-		corrects = [0, 0, 0]
-		runtimes = [0, 0, 0]
-		for batch_idx, (inputs, targets) in enumerate(dataloader):
-			# data
-			targets = Variable(targets).cuda()
-			inputs = Variable(inputs).cuda()
-			# counters
-			batch_size, C, H, W = inputs.shape
-			nbatches += 1
-			total += batch_size
-
-			# clone inputs (N-1) times
-			x = scale(inputs.clone(), stats).unsqueeze(0).expand(nactors - 1, batch_size, C, H, W).contiguous().view((nactors-1)*batch_size, C, H, W)
-			# shuffle samples
-			x = x[torch.randperm(x.shape[0]), ...]
-
-			# latents
-			_, z_c, _ = inet(x)
-			z_c = z_c.view(nactors - 1, batch_size, z_c.shape[1], z_c.shape[2], z_c.shape[3]).sum(dim=0)
-
-			# fusion inputs
-			x_g = torch.cat([scale(inputs.clone(), stats).unsqueeze(1), x.view(nactors - 1, batch_size, C, H, W).permute(1, 0, 2, 3, 4)], dim=1)
-
-			start_time = time.time()
-			if concat_input:
-				x_g = x_g.permute(0, 2, 1, 3, 4)
-
-			# N, A, C, H, W = x_g.shape
-			# x_g = x_g.view(N, A * C, H, W)
-			img_fused = fnet(x_g)
-			# img_fused = img_fused.view(inputs.shape)
-			# img_fused = fnet(x_g)
-			img_fused = rescale(img_fused.clone(), stats)
-			runtimes[0] += time.time() - start_time
-
-			# time f
-			start_time = time.time()
-			_, z_fused, _ = inet(img_fused)
-			runtimes[1] += time.time() - start_time
-
-			start_time = time.time()
-			z_hat = nactors * z_fused - z_c
-			out_hat = inet.module.classifier(z_hat)
-			runtimes[2] += time.time() - start_time
-
-			out, _, _ = inet(inputs)
-			_, y = torch.max(out.data, 1)
-			_, y_hat = torch.max(out_hat.data, 1)
-
-			corrects[0] += y.eq(targets.data).sum().cpu().item()
-			corrects[1] += y_hat.eq(targets.data).sum().cpu().item()
-			corrects[2] += y_hat.eq(y.data).sum().cpu().item()
-
-			del _, z_c, z_hat, z_fused, inputs, targets, img_fused, out, out_hat, y, y_hat
-
-		# Evaluate time and classification performance
-		corrects = 100 * np.asarray(corrects) / total
-		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
-		runtimes = np.asarray(runtimes)/ nbatches
-		print('Average time G: {:.4f}, E: {:.4f}, C: {:.4f} over {} batches of size {}'.format(runtimes[0], runtimes[1], runtimes[2], nbatches, batch_size))
-
-	@staticmethod
-	def evaluate_fnet2(inet, fnet, dataloader, nactors, nchannels=3, targets=None, concat_input=False):
-		print('Evaluate fusion network')
-		inet.eval()
-		fnet.eval()
-
-		total = 0
-		nbatches = 0
-		corrects = [0, 0, 0]
-		runtimes = [0, 0, 0]
-		sum_mae = 0
-		sum_mse = 0
-		criterionMSE = nn.MSELoss(reduction='mean')
-		for batch_idx, (inputs, targets) in enumerate(dataloader):
-			nbatches += 1
-			targets = Variable(targets).cuda()
-			inputs = Variable(inputs).cuda()
-			batch_size, C, H, W = inputs.shape
-			total += batch_size
-
-			x = inputs.unsqueeze(0).expand(nactors, batch_size, C, H, W).contiguous().view(nactors*batch_size, C, H, W)
-			x = x[torch.randperm(x.shape[0]), ...]
-
-			_, z_c, _ = inet(x)
-			z_c = z_c.view(nactors, batch_size, z_c.shape[1], z_c.shape[2], z_c.shape[3])
-			sum_z = z_c.sum(dim=0)
-
-			x = x.view(nactors, batch_size, C, H, W)
-			x_g = x[torch.randperm(nactors), ...].permute(1, 0, 2, 3, 4)
-			img_fused = fnet(x_g)
-			_, z_fused, _ = inet(img_fused)
-
-			for k in range(nactors):
-				z = sum_z - z_c[k, ...]
-				z_hat = nactors * z_fused - z
-				out_hat = inet.module.classifier(z_hat)
-
-				inputs = x[k, ...]
-				out, _, _ = inet(inputs)
-				_, y = torch.max(out.data, 1)
-				_, y_hat = torch.max(out_hat.data, 1)
-
-				corrects[2] += y_hat.eq(y.data).sum().cpu().item()/nactors
-
-				input_hat = inet.module.inverse(z_hat)
-				mae = torch.norm((input_hat - inputs).view(batch_size, -1), dim=1) / torch.norm(inputs.view(batch_size, -1), dim=1)
-				sum_mae += mae.mean().cpu().item()/nactors
-
-				sum_mse += criterionMSE(input_hat, inputs).mean().cpu().item() /nactors
-
-				max = inputs.abs().max().cpu().item()
-				min = (input_hat - inputs).abs().max().cpu().item()
-
-			del _, z_c, z_hat, z_fused, inputs, targets, img_fused, out, out_hat, y, y_hat
-
-		# Evaluate time and classification performance
-		corrects = 100 * np.asarray(corrects) / (total)
-		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
-
-		print('\t == MAE: {:.4f}, MSE: {:.4f} in {:.4f} -> {:.4f}'.format(sum_mae/nbatches, sum_mse/nbatches, min, max))
-
-		runtimes = np.asarray(runtimes)/ nbatches
-		print('Average time G: {:.4f}, E: {:.4f}, C: {:.4f} over {} batches of size {}'.format(runtimes[0], runtimes[1], runtimes[2], nbatches, batch_size))
-
-	@staticmethod
-	def evaluate_fnet(inet, fnet, dataloader, nactors, nchannels=3, targets=None, concat_input=False):
-		print('Evaluate fusion network')
-		inet.eval()
-		fnet.eval()
-
-		total = 0
-		nbatches = 0
-		corrects = [0, 0, 0]
-		runtimes = [0, 0, 0]
-		sum_mae = 0
-		sum_mse = 0
-		for batch_idx, (inputs, targets) in enumerate(dataloader):
-			nbatches += 1
-			targets = Variable(targets).cuda()
-			inputs = Variable(inputs).cuda()
-			batch_size, C, H, W = inputs.shape
-			total += batch_size
-
-			x = inputs.unsqueeze(0).expand(nactors - 1, batch_size, C, H, W).contiguous().view((nactors-1)*batch_size, C, H, W)
-			x = x[torch.randperm(x.shape[0]), ...]
-
-			_, z_c, _ = inet(x)
-			z_c = z_c.view(nactors - 1, batch_size, z_c.shape[1], z_c.shape[2], z_c.shape[3]).sum(dim=0)
-
-			x_g = torch.cat([inputs.unsqueeze(1), x.view(nactors - 1, batch_size, C, H, W).permute(1, 0, 2, 3, 4)], dim=1)
-
-			start_time = time.time()
-			if concat_input:
-				x_g = x_g.permute(0, 2, 1, 3, 4)
-
-			# randomly permute batch_size
-			x_g = x_g[:, torch.randperm(nactors), ...]
-			# new
-			N, A, C, H, W = x_g.shape
-			x_g = x_g.view(N, A * C, H, W)
-			img_fused = fnet(x_g)
-			img_fused = fnet(img_fused).view(inputs.shape)
-			runtimes[0] += time.time() - start_time
-
-			# time f
-			start_time = time.time()
-			_, z_fused, _ = inet(img_fused)
-			runtimes[1] += time.time() - start_time
-
-			start_time = time.time()
-			z_hat = nactors * z_fused - z_c
-			out_hat = inet.module.classifier(z_hat)
-			runtimes[2] += time.time() - start_time
-
-			out, z, _ = inet(inputs)
-			_, y = torch.max(out.data, 1)
-			_, y_hat = torch.max(out_hat.data, 1)
-
-			corrects[0] += y.eq(targets.data).sum().cpu().item()
-			corrects[1] += y_hat.eq(targets.data).sum().cpu().item()
-			corrects[2] += y_hat.eq(y.data).sum().cpu().item()
-
-			del _, z_c, z_fused, inputs, targets, img_fused, out, out_hat, y, y_hat
-
-		# input_hat = inet.module.inverse(z_hat)
-		mae = torch.norm((z_hat - z).view(batch_size, -1), dim=1) / torch.norm(z.view(batch_size, -1), dim=1)
-		sum_mae = mae.mean().cpu().item()
-		sum_mse = criterionMSE(z_hat, z).mean().cpu().item()
-
-		mean = (z_hat - z).abs().mean().cpu().item()
-		median = (z_hat - z).abs().median().cpu().item()
-		min = z.abs().mean().cpu().item()
-		max = z.abs().median().cpu().item()
-
-		# Evaluate time and classification performance
-		corrects = 100 * np.asarray(corrects) / total
-		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
-
-		print('\t == MAE: {:.4f}, MSE: {:.4f} Mean {:.4f}, Median {:.4f}, Z-Range {:.4f} {:.4f}'.format(sum_mae, sum_mse, mean, median, min, max))
-
-		runtimes = np.asarray(runtimes)/ nbatches
-		print('Average time G: {:.4f}, E: {:.4f}, C: {:.4f} over {} batches of size {}'.format(runtimes[0], runtimes[1], runtimes[2], nbatches, batch_size))
 
 	@staticmethod
 	def eval_inv(model, testloader, sample_path, model_name, num_epochs, nactors, debug=False):

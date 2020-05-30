@@ -29,37 +29,45 @@ use_cuda = torch.cuda.is_available()
 cudnn.benchmark = True
 
 ########## Paths ####################
-root = 'inet'
+args.fnet_name = "fnet_{}_{}_{}_{}".format(args.fname, args.dataset, args.iname, args.nactors)
+args.inet_name = "inet_{}_{}".format(args.dataset, args.iname)
+
 checkpoint_dir = os.path.join(args.save_dir, 'checkpoints')
 inet_sample_dir = os.path.join(args.save_dir, 'samples/inet')
-
-# setup logging with visdom
-viz = visdom.Visdom(port=args.vis_port, server="http://" + args.vis_server)
-assert viz.check_connection(), "Could not make visdom"
-
+args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
+args.fnet_save_dir = os.path.join(checkpoint_dir, args.fnet_name)
 Helper.try_make_dir(args.save_dir)
 Helper.try_make_dir(checkpoint_dir)
 Helper.try_make_dir(inet_sample_dir)
+Helper.try_make_dir(args.fnet_save_dir)
+Helper.try_make_dir(args.inet_save_dir)
 
 ########### DATA #################
 trainset, testset, in_shape = Provider.load_data(args.dataset, args.data_dir)
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
-########## Loss ####################
-bce_loss = nn.BCELoss().cuda()
-softmax = nn.Softmax(dim=1).cuda()
-criterionCE = nn.CrossEntropyLoss().cuda()
-criterionMSE = nn.MSELoss(reduction='sum').cuda()
-
 if args.dataset == 'cifar10':
-    args.input_nc = 3
-    args.output_nc = 3
+	args.input_nc = 3
+	args.output_nc = 3
+	in_shape = (3, 32, 32)
 else:
-    args.input_nc = 1
-    args.output_nc = 1
+	args.input_nc = 1
+	args.output_nc = 1
+	in_shape = (1, 32, 32)
 
-# Evaluation
+# setup logging with visdom
+viz = visdom.Visdom(port=args.vis_port, server="http://" + args.vis_server)
+assert viz.check_connection(), "Could not make visdom"
+
+
+########## Loss ####################
+bce_loss = nn.BCELoss()
+softmax = nn.Softmax(dim=1)
+criterionCE = nn.CrossEntropyLoss()
+criterionL1 = nn.L1Loss()
+
+########## # Evaluation ####################
 def analyse(args, model, in_shapes, trainloader, testloader):
 	if args.evaluate:
 		Tester.eval_inv(model, testloader, inet_sample_dir, args.inet_name, nactors=args.nactors, num_epochs=args.resume)
@@ -158,57 +166,33 @@ def analyse(args, model, in_shapes, trainloader, testloader):
 
 	if args.evalFgan:
 		from fusionnet.pix2pix import Pix2PixModel
-		# args.input_nc = args.input_nc * args.nactors
 		args.norm='batch'
-		args.dataset_mode='aligned'
-		args.gpu_ids = [0]
-		#train
 		args.pool_size=0
-		args.gan_mode='lsgan'
-		args.netD = 'pixel'
-		args.name = 'large'
-		args.fnet_name = "{}_{}_{}_{}".format(args.dataset, args.name, args.nactors, args.gan_mode)
+		args.gpu_ids = [0]
 		args.isTrain = False
 
 		pix2pix = Pix2PixModel(args)
 		pix2pix.setup(args)              # regular setup: load and print networks; create schedulers
 		pix2pix.load_networks(epoch=int(args.resume_g))
-		fnet = pix2pix.netG
-
-		sample_path = os.path.join(args.save_dir, 'samples')
-		if args.flag_test:
-			data_loader = testloader
-			print('Evaluate on Test set')
-		else:
-			data_loader = trainloader
-			print('Evaluate on Train set')
-		Tester.plot_reconstruction(args.fnet_name, sample_path, model, fnet, data_loader, args.nactors)
-
-		Tester.evaluate_fgan(model, fnet, testloader, stats=None, nactors=args.nactors, nchannels=in_shape[0], concat_input=True)
+		# sample_path = os.path.join(args.save_dir, 'samples')
+		# Tester.plot_reconstruction(args.fnet_name, sample_path, model, fnet, data_loader, args.nactors)
+		Tester.evaluate_fgan(model, pix2pix.netG, testloader, args.nactors)
 
 		return True
 
 	if args.evalDistill:
 		from fusionnet.networks import define_G
-		ninputs = args.nactors
-		input_nc = args.input_nc
+		args.norm='batch'
+		args.dataset_mode='aligned'
+		args.gpu_ids = [0]
+		args.pool_size=0
 
-		fnet = define_G(
-				input_nc=input_nc,
-				output_nc=in_shape[0],
-				nactors=ninputs,
-				ngf=8,
-				norm='batch',
-				use_dropout=False,
-				init_type='normal',
-				init_gain=0.02,
-				gpu_id=device)
-		fname = 'fnet_integrated_{}_{}_perturb_e{}.pth'.format(args.inet_name, args.nactors, args.resume_g)
-		# fname = 'fnet_integrated_cifar10_mixup_hidden_4.pth'
-		fnet_path = os.path.join(checkpoint_dir, fname)
+		fnet = define_G(args.input_nc, args.output_nc, args.ngf, args.netG, args.norm, not args.no_dropout, args.init_type, args.init_gain, args.gpu_ids, nactors=args.nactors)
+		save_filename = '%s_net.pth' % (args.resume_g)
+		fnet_path = os.path.join(args.fnet_save_dir, save_filename)
 		fnet.load_state_dict(torch.load(fnet_path))
-		# fnet = torch.load(fnet_path)
-		Tester.evaluate_fnet(model, fnet, testloader, nactors=args.nactors, nchannels=in_shape[0], concat_input=args.concat_input)
+		print("-- Loading checkpoint '{}'".format(fnet_path))
+		Tester.evaluate_fgan(model, fnet, testloader, args.nactors)
 
 		return True
 
@@ -217,7 +201,7 @@ def analyse(args, model, in_shapes, trainloader, testloader):
 		data = np.load(data_path).astype('float32')
 		train_set = torch.Tensor(data)
 		test_loader = torch.utils.data.DataLoader(dataset=train_set,
-		    batch_size=args.batch_size, shuffle=True)
+			batch_size=args.batch_size, shuffle=True)
 		Tester.eval_sensitivity(model, test_loader, args.eps)
 		return True
 

@@ -4,6 +4,9 @@
 """
 
 from init_invnet import *
+from torch.utils.tensorboard import SummaryWriter
+
+writer = SummaryWriter('../results/runs/' + args.inet_name)
 
 inet = iResNet(nBlocks=args.nBlocks,
 				nStrides=args.nStrides,
@@ -21,7 +24,6 @@ inet = iResNet(nBlocks=args.nBlocks,
 				learn_prior=(not args.fixedPrior),
 				nonlin=args.nonlin).to(device)
 
-
 init_batch = Helper.get_init_batch(trainloader, args.init_batch)
 print("initializing actnorm parameters...")
 with torch.no_grad():
@@ -29,23 +31,23 @@ with torch.no_grad():
 print("initialized")
 inet = torch.nn.DataParallel(inet, range(torch.cuda.device_count()))
 
-if os.path.isfile(inet_path):
-	print("-- Loading checkpoint '{}'".format(inet_path))
-	"""
-	checkpoint = torch.load(inet_path)
-	# inet = checkpoint['inet']
-	best_inet = checkpoint['inet']
-	# load dict only
-	inet.load_state_dict(best_inet.state_dict())
-	best_objective = checkpoint['objective']
-	print('----- Objective: {:.4f}'.format(best_objective))
-	"""
-	inet.load_state_dict(torch.load(inet_path))
-else:
-	print("--- No checkpoint found at '{}'".format(inet_path))
-	args.resume = 0
+if args.resume > 0:
+	save_filename = '%s_net.pth' % (args.resume)
+	inet_path = os.path.join(args.inet_save_dir, save_filename)
+	if os.path.isfile(inet_path):
+		print("-- Loading checkpoint '{}'".format(inet_path))
+		inet.load_state_dict(torch.load(inet_path))
+	else:
+		print("--- No checkpoint found at '{}'".format(inet_path))
+		sys.exit('Done')
 
+####################### Analysis ##############################
 in_shapes = inet.module.get_in_shapes()
+if analyse(args, inet, in_shapes, trainloader, testloader):
+	sys.exit('Done')
+
+
+####################### Training ##############################
 if args.optimizer == "adam":
 	optimizer = optim.Adam(inet.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 else:
@@ -53,26 +55,23 @@ else:
 						  momentum=0.9, weight_decay=args.weight_decay, nesterov=args.nesterov)
 
 scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-##### Analysis ######
-if analyse(args, inet, in_shapes, trainloader, testloader):
-	sys.exit('Done')
 
-##### Training ######
+
 print('|  Train: mixup: {} mixup_hidden {} alpha {} epochs {}'.format(args.mixup, args.mixup_hidden, args.mixup_alpha, args.epochs))
 print('|  Initial Learning Rate: ' + str(args.lr))
 elapsed_time = 0
 test_objective = -np.inf
-epoch = int(args.resume)
-for epoch in range(epoch + 1, epoch + 1 + args.epochs):
+init_epoch = int(args.resume)
+for epoch in range(init_epoch + 1, init_epoch + 1 + args.epochs):
 	start_time = time.time()
 	inet.train()
 	losses = AverageMeter()
 	top1 = AverageMeter()
 	top5 = AverageMeter()
 	# update lr for this epoch (for classification only)
-	# lr = Helper.learning_rate(args.lr, epoch)
-	# Helper.update_lr(optimizer, lr)
-	# print('|Learning Rate: ' + str(lr))
+	lr = Helper.learning_rate(args.lr, epoch - init_epoch)
+	Helper.update_lr(optimizer, lr)
+	print('|Learning Rate: ' + str(lr))
 	for batch_idx, (inputs, targets) in enumerate(trainloader):
 		cur_iter = (epoch - 1) * len(trainloader) + batch_idx
 		# if first epoch use warmup
@@ -87,7 +86,8 @@ for epoch in range(epoch + 1, epoch + 1 + args.epochs):
 		loss = bce_loss(softmax(logits), reweighted_target)
 
 		# measure accuracy and record loss
-		prec1, prec5 = Helper.accuracy(logits, targets, topk=(1, 5))
+		_, labels = torch.max(reweighted_target.data, 1)
+		prec1, prec5 = Helper.accuracy(logits, labels, topk=(1, 5))
 		losses.update(loss.item(), inputs.size(0))
 		top1.update(prec1.item(), inputs.size(0))
 		top5.update(prec5.item(), inputs.size(0))
@@ -99,20 +99,22 @@ for epoch in range(epoch + 1, epoch + 1 + args.epochs):
 			sys.stdout.write('\r')
 			sys.stdout.write('| Epoch [%3d/%3d] Iter[%3d/%3d]\t\tLoss: %.4f Acc@1: %.3f Acc@5: %.3f'
 						 % (epoch, args.epochs, batch_idx+1,
-							(len(trainset)//args.batch)+1, loss.data.item(),
+							(len(trainset)//args.batch_size)+1, loss.data.item(),
 							top1.avg, top5.avg))
 			sys.stdout.flush()
 
-	scheduler.step()
+	# scheduler.step()
 	epoch_time = time.time() - start_time
 	elapsed_time += epoch_time
 	print('| Elapsed time : %d:%02d:%02d' % (Helper.get_hms(elapsed_time)))
+	writer.add_scalar('train_loss', loss, epoch)
 
-	if (epoch - 1) % args.save_steps == 0:
-		test_objective = Tester.eval_invertibility(inet, testloader, sample_dir, args.model_name, num_epochs=epoch)
-		Helper.save_checkpoint(inet, test_objective, checkpoint_dir, args.optim_fnet_name, epoch)
+	if (epoch - 1) % args.save_steps == 0 or epoch == init_epoch + args.epochs:
+		# evaluate
+		print("Evaluating on Testset")
+		Tester.evaluate(inet, testloader)
+		#save
+		Helper.save_networks(inet, args.inet_save_dir, epoch)
 
 ########################## Store ##################
-test_objective = Tester.eval_invertibility(inet, testloader, sample_dir, args.model_name, num_epochs=args.epochs)
-Helper.save_checkpoint(inet, test_objective, checkpoint_dir, args.model_name, args.epochs)
 print('Done')

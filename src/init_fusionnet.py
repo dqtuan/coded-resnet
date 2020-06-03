@@ -14,74 +14,54 @@ import torch.backends.cudnn as cudnn
 import torchvision
 
 from utils.helper import Helper
+from utils.provider import FusionDataset
 from configs import args
 
-from fusionnet.networks import define_G
-root = 'fnet'
 
 ############ Settings ##############
-TRAIN_FRACTION = 0.75
+TRAIN_FRACTION = 0.8
 cudnn.benchmark = True
 torch.cuda.manual_seed(args.seed)
-device = torch.device("cuda:0" if args.cuda else "cpu")
+device = torch.device("cuda:0")
 
-# define paths
-args.model_name = "{}_{}_{}".format(args.dataset, args.name, args.nactors)
+args.fnet_name = "fnet_{}_{}_{}_{}".format(args.fname, args.dataset, args.iname, args.nactors)
+args.inet_name = "inet_{}_{}".format(args.dataset, args.iname)
 
-data_dir = os.path.join(args.data_dir, root)
-data_path = os.path.join(args.data_dir, "{}_data.npy".format(args.model_name))
-stat_path = os.path.join(args.data_dir, "{}_stats.npy".format(args.model_name))
-
-checkpoint_dir = os.path.join(args.save_dir, 'checkpoints/{}'.format(root))
-sample_dir = os.path.join(args.save_dir, 'samples/{}'.format(root))
-fnet_path = os.path.join(checkpoint_dir, "{}_{}.pth".format(args.model_name))
-
+checkpoint_dir = os.path.join(args.save_dir, 'checkpoints')
+args.inet_save_dir = os.path.join(checkpoint_dir, args.inet_name)
+args.fnet_save_dir = os.path.join(checkpoint_dir, args.fnet_name)
 Helper.try_make_dir(args.save_dir)
 Helper.try_make_dir(checkpoint_dir)
-Helper.try_make_dir(sample_dir)
+Helper.try_make_dir(args.fnet_save_dir)
+Helper.try_make_dir(args.inet_save_dir)
 
-############ Data ##############
-dict_data = np.load(data_path, allow_pickle=True)
-dict_data = dict_data.item()
-data = dict_data['images'].astype('float32')
-labels = dict_data['labels']
-nsamples = data.shape[0]
-ntrains = int(nsamples * TRAIN_FRACTION)
-stats = {
-    'target': {},
-    'input':{}
-}
-stats['target']['mean'] = np.mean(data[:, -1, ...], axis=(0, 2,3))
-stats['target']['std'] = np.std(data[:, -1, ...], axis=(0, 2,3))
-stats['target']['min'] = np.min(data[:, -1, ...], axis=(0, 2,3))
-stats['target']['max'] = np.max(data[:, -1, ...], axis=(0, 2,3))
+if args.dataset == 'cifar10':
+    args.input_nc = 3
+    args.output_nc = 3
+	in_shape = (3, 32, 32)
+else:
+    args.input_nc = 1
+    args.output_nc = 1
+    in_shape = (1, 32, 32)
 
-stats['input']['mean'] = np.mean(data[:, 0, ...], axis=(0, 2,3))
-stats['input']['std'] = np.std(data[:, 0, ...], axis=(0, 2,3))
-stats['input']['min'] = np.min(data[:, 0, ...], axis=(0, 2,3))
-stats['input']['max'] = np.max(data[:, 0, ...], axis=(0, 2,3))
-# STORE stats
-print(stats)
-np.save(stat_path, stats)
-############ Standarlize ##############
-for i in range(args.input_nc):
-    for k in range(args.nactors):
-        data[:, k, i, ...] = (data[:, k, i, ...] - stats['input']['mean'][i]) / stats['input']['std'][i]
-    data[:, -1, i, ...] = (data[:, -1, i, ...] - stats['target']['mean'][i]) / stats['target']['std'][i]
-print('Dataset: {}, {}'.format(nsamples, ntrains))
-# apply transform??? check the range
-train_set = torch.Tensor(data[:ntrains, ...])
-test_set = torch.Tensor(data[ntrains:, ...])
-train_loader = DataLoader(dataset=train_set,
+train_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_train.npy".format(args.dataset, args.iname, args.nactors, args.reduction))
+test_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_test.npy".format(args.dataset, args.iname, args.nactors, args.reduction))
+val_path = os.path.join(args.data_dir, "fusion/inet_{}_{}_{}_{}_data_val.npy".format(args.dataset, args.iname, args.nactors, args.reduction))
+train_dataset = FusionDataset(train_path)
+test_dataset = FusionDataset(test_path)
+val_dataset = FusionDataset(val_path)
+
+# train_size = int(nsamples * TRAIN_FRACTION)
+# validation_size = nsamples - train_size
+print("{}: Train {} Val {} Test {}".format(args.dataset, len(train_dataset), len(val_dataset), len(test_dataset)))
+
+# train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, validation_size])
+train_loader = DataLoader(dataset=train_dataset,
     num_workers=args.threads,
     batch_size=args.batch_size, shuffle=True)
-test_loader = DataLoader(dataset=test_set,
+test_loader = DataLoader(dataset=test_dataset,
     num_workers=args.threads,
     batch_size=args.batch_size, shuffle=False)
-
-######## Losss ####
-criterionMSE = nn.MSELoss(reduction='sum')
-if args.dataset=='mnist':
-    npixels = 32*32*1
-else:
-    npixels = 32*32*3
+val_loader = DataLoader(dataset=val_dataset,
+    num_workers=args.threads,
+    batch_size=args.batch_size, shuffle=False)

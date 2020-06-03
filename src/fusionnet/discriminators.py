@@ -1,6 +1,7 @@
 
-
+import torch
 import torch.nn as nn
+import functools
 
 # Defines the PatchGAN discriminator with the specified arguments.
 class NLayerDiscriminator(nn.Module):

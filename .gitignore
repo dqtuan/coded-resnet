@@ -9,6 +9,11 @@ __pycache__/
 data/
 results/
 refs/
+runs/
+scripts/
+_report/
+sources/
+inv-net.todo
 
 
 # Distribution / packaging

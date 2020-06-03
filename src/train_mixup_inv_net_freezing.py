@@ -1,6 +1,6 @@
 """
 	@author Tuan Dinh tuandinh@cs.wisc.edu
-	@date 08/14/2019
+	@date 02/14/2020
 """
 
 from init_invnet import *

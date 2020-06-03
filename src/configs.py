@@ -25,7 +25,7 @@ parser.add_argument('--batch_size', type=int, default=64, help='training batch s
 parser.add_argument('--test_batch_size', type=int, default=1, help='testing batch size')
 parser.add_argument('--epochs', default=200, type=int, help='number of epochs')
 
-parser.add_argument('--log_steps', type=int, default=30)
+parser.add_argument('--log_steps', type=int, default=50)
 parser.add_argument('--save_steps', type=int, default=10)
 
 # optimization

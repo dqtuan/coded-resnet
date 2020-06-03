@@ -111,9 +111,9 @@ def batch_process(inet, fnet, inputs, targets, nactors):
 	inputs = inputs[:N, ...].view(M, A, C, H, W)
 	targets = targets[:N, ...].view(M, A)
 
-	indices = torch.randperm(A)
-	inputs = inputs[:, indices, ...]
-	targets = targets[:, indices]
+	# indices = torch.randperm(A)
+	# inputs = inputs[:, indices, ...]
+	# targets = targets[:, indices]
 	# fusion inputs
 	x_g = inputs.view(M, A*C, H, W)
 	x_fused_g = rescale(fnet(x_g))
@@ -179,11 +179,27 @@ class Tester:
 			s = batch_score(inet, z_missed, z_missed_g, target_missed)
 			corrects += s
 			ntests += z_missed.shape[0]
-
 			del z_missed, z_missed_g, target_missed, _
 
 		corrects = 100 * corrects / ntests
 		print('\t == Correctly classified: X {:.4f} X_hat {:.4f} Match {:.4f}'.format(corrects[0], corrects[1], corrects[2]))
+
+	@staticmethod
+	def evaluate_fgan_loss(inet, fnet, dataloader, nactors):
+		print('Evaluate Fusion Network')
+		inet.eval()
+		fnet.eval()
+		top1 = AverageMeter()
+		top5 = AverageMeter()
+		for batch_idx, (inputs, targets) in enumerate(dataloader):
+			z_missed, z_missed_g, target_missed, _ = batch_process(inet, fnet, inputs, targets, nactors)
+			out_missed_g = inet.module.classifier(z_missed_g)
+			prec1, prec5 = Helper.accuracy(out_missed_g, target_missed, topk=(1, 5))
+			top1.update(prec1.item(), target_missed.size(0))
+			top5.update(prec5.item(), target_missed.size(0))
+			del z_missed, z_missed_g, target_missed, _
+
+		return top1.avg, top5.avg
 
 	@staticmethod
 	def evaluate_fnet(inet, fnet, dataloader, stats, nactors, nchannels=3, targets=None, concat_input=False):

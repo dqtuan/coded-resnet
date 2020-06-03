@@ -21,6 +21,6 @@ dataset="cifar10"
 init=1
 nactors=4
 resume=200
-resume_g=21 #501
+resume_g=31 #501
 
 python ./train_mixup_inv_net.py --dataset $dataset --iname $iname --fname $fname --resume $resume --resume_g $resume_g  --nactors $nactors --init_ds $init --evalDistill

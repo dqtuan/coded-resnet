@@ -1,7 +1,6 @@
 """
 	@author Tuan Dinh tuandinh@cs.wisc.edu
-	@date 08/14/2019
-	Loading data
+	@date 02/14/2020
 """
 
 import torch
@@ -20,13 +19,15 @@ from utils.plotter import Plotter
 from utils.tester import Tester
 from utils.provider import Provider
 from configs import args
-
 from invnet.iresnet import conv_iResNet as iResNet
 
+import warnings
+warnings.filterwarnings("ignore")
 ########## Setting ####################
 device = torch.device("cuda:0")
 use_cuda = torch.cuda.is_available()
 cudnn.benchmark = True
+TRAIN_FRACTION = 0.8
 
 ########## Paths ####################
 args.fnet_name = "fnet_{}_{}_{}_{}".format(args.fname, args.dataset, args.iname, args.nactors)
@@ -43,8 +44,13 @@ Helper.try_make_dir(args.fnet_save_dir)
 Helper.try_make_dir(args.inet_save_dir)
 
 ########### DATA #################
-trainset, testset, in_shape = Provider.load_data(args.dataset, args.data_dir)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+traindata, testset, in_shape = Provider.load_data(args.dataset, args.data_dir)
+nsamples = len(traindata)
+train_size = int(nsamples * TRAIN_FRACTION)
+val_size = nsamples - train_size
+trainset, valset = torch.utils.data.random_split(traindata, [train_size, val_size])
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2, drop_last=True)
+valloader = torch.utils.data.DataLoader(valset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 testloader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
 if args.dataset == 'cifar10':
@@ -57,9 +63,8 @@ else:
 	in_shape = (1, 32, 32)
 
 # setup logging with visdom
-viz = visdom.Visdom(port=args.vis_port, server="http://" + args.vis_server)
-assert viz.check_connection(), "Could not make visdom"
-
+# viz = visdom.Visdom(port=args.vis_port, server="http://" + args.vis_server)
+# assert viz.check_connection(), "Could not make visdom"
 
 ########## Loss ####################
 bce_loss = nn.BCELoss()

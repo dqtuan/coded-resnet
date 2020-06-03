@@ -1,3 +1,7 @@
+"""
+	@author Tuan Dinh tuandinh@cs.wisc.edu
+	@date 02/14/2020
+"""
 
 from init import *
 from models.critic import Discriminator

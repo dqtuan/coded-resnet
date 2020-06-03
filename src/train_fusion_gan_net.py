@@ -1,6 +1,6 @@
 """
-	Doing fusion 2 images to match target images
-	Supervised tasks
+	@author Tuan Dinh tuandinh@cs.wisc.edu
+	@date 02/14/2020
 """
 from init_fusionnet import *
 from fusionnet.pix2pix import Pix2PixModel

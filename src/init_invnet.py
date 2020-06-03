@@ -1,7 +1,6 @@
 """
 	@author Tuan Dinh tuandinh@cs.wisc.edu
-	@date 08/14/2019
-	Loading data
+	@date 02/14/2020
 """
 
 import torch

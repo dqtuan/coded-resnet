@@ -1,4 +1,6 @@
 """
+	@author Tuan Dinh tuandinh@cs.wisc.edu
+	@date 02/14/2020
 """
 from __future__ import print_function
 

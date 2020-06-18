@@ -1,22 +1,22 @@
-
-###================= mnist =================
+###================= setup ===================
 iname="mixup"
 fname="distill"
-### MNIST ###
+
+###================= mnist ===================
 # dataset="mnist"
 # init=2
 # nactors=4
 # resume=201
 # resume_g=101
 
-####================= Fashion ###=================
+####================= Fashion ================
 # dataset="fashion"
 # init=2
 # nactors=4
 # resume=121
 # resume_g=21
 #
-####================= Cifar10 ###=================
+####================= Cifar10 ================
 dataset="cifar10"
 init=1
 nactors=4

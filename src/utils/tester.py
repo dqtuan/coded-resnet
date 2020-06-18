@@ -12,8 +12,8 @@ from utils.helper import Helper
 criterionMSE = nn.MSELoss(reduction='mean')
 criterionL1 = torch.nn.L1Loss(reduction='mean')
 
-def atanh(x):
-	return 0.5*torch.log((1+x)/(1-x))
+def atanh(x, eps=1e-4):
+	return 0.5*torch.log((1+x + eps)/(1-x + eps))
 
 def scale(imgs, stats=None):
 	if stats == None:
@@ -517,6 +517,8 @@ class Tester:
 
 		print("L1: {:.4f}".format(criterionL1(torch.tanh(x_fused_g), torch.tanh(x_fused))))
 		print(np.asarray(corrects)/M)
+		from IPython import embed; embed()
+
 
 
 	@staticmethod

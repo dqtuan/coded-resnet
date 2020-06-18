@@ -50,8 +50,10 @@ parser.add_argument('--epoch_count', type=int, default=1, help='the starting epo
 # flags
 parser.add_argument('--debug', action='store_true', help='debug')
 parser.add_argument('--flag_retrain', action='store_true', help='resume')
+parser.add_argument('--flag_plot', action='store_true', help='resume')
 parser.add_argument('--flag_test', action='store_true', help='test')
 parser.add_argument('--flag_val', action='store_true', help='val')
+parser.add_argument('--flag_overfit', action='store_true', help='Overfit')
 parser.add_argument('--resume', default=0, type=int, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--resume_g', default=0, type=int, metavar='PATH',
@@ -115,8 +117,9 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('-interpolate', '--interpolate',
                     dest='interpolate', action='store_true', help='train iresnet')
-parser.add_argument('-norm', '--norm', dest='norm', action='store_true',
-                    help='compute norms of conv operators')
+# parser.add_argument('-norm', '--norm', dest='norm', action='store_true',
+#                     help='compute norms of conv operators')
+parser.add_argument('--norm', default='batch', type=str)
 parser.add_argument('-analysisTraceEst', '--analysisTraceEst', dest='analysisTraceEst', action='store_true',
                     help='analysis of trace estimation')
 
@@ -157,7 +160,7 @@ parser.add_argument('--lambda_L1', type=float, default=100, help='weight on L1 t
 ### Pix2PixModel
 """Define the common options that are used in both training and test."""
 # basic parameters
-parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
+parser.add_argument('--gpu_ids', type=str, default='0,', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
 parser.add_argument('--checkpoints_dir', type=str, default='../results/checkpoints', help='models are saved here')
 # model parameters
 parser.add_argument('--model', type=str, default='cycle_gan', help='chooses which model to use. [cycle_gan | pix2pix | test | colorization]')
@@ -209,7 +212,7 @@ parser.add_argument('--phase', type=str, default='train', help='train, val, test
 parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs with the initial learning rate')
 parser.add_argument('--n_epochs_decay', type=int, default=100, help='number of epochs to linearly decay learning rate to zero')
 parser.add_argument('--gan_mode', type=str, default='lsgan', help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
-parser.add_argument('--pool_size', type=int, default=50, help='the size of image buffer that stores previously generated images')
+parser.add_argument('--pool_size', type=int, default=0, help='the size of image buffer that stores previously generated images')
 
 args = parser.parse_args()
 # print(args)

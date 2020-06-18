@@ -451,29 +451,37 @@ class UnetGenerator(nn.Module):
         """
         super(UnetGenerator, self).__init__()
         # construct unet structure
-        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, subleft=None, subright=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
+        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
         for i in range(num_downs - 5):          # add intermediate layers with ngf * 8 filters
-            unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, subleft=unet_block.model_left, subright=unet_block.model_right, norm_layer=norm_layer, use_dropout=use_dropout)
+            unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
         # gradually reduce the number of filters from ngf * 8 to ngf
-        unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, subleft=unet_block.model_left, subright=unet_block.model_right, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, subleft=unet_block.model_left, subright=unet_block.model_right, norm_layer=norm_layer)
-        unet_block = UnetSkipConnectionBlock(ngf, ngf * 2, input_nc=None, subleft=unet_block.model_left, subright=unet_block.model_right, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf, ngf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
 
-        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, subleft=unet_block.model_left, subright=unet_block.model_right, outermost=True, norm_layer=norm_layer)  # add the outermost layer
+        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
 
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+        self.downconv = nn.Conv2d(input_nc, ngf, kernel_size=4,
+                             stride=2, padding=1, bias=use_bias)
         self.nactors = nactors
 
-    def forward(self, input):
+    def forward(self, input, reduction='mean'):
         """Standard forward"""
         N, M, H, W = input.shape
         A = self.nactors
         C = M // A
-        input = input.view(N, A, C, H, W).view(N*A, C, H, W)
-        z = self.model.model_left(input)
-        _, Cz, Hz, Wz = z.shape
-        z = z.unsqueeze(1).contiguous().view(N, A, Cz, Hz, Wz)
+        input = input.view(N, A, C, H, W).view(N * A, C, H, W)
+        z = self.downconv(input)
+        z = z.unsqueeze(1).contiguous().view(N, A, z.shape[1], z.shape[2], z.shape[3])
+        # if reduction == 'sum':
+        #     z = z.sum(dim=1)
+        # else:
         z = z.mean(dim=1)
-        return self.model.model_right(z)
+        return self.model(z)
 
 
 class UnetSkipConnectionBlock(nn.Module):
@@ -483,7 +491,7 @@ class UnetSkipConnectionBlock(nn.Module):
     """
 
     def __init__(self, outer_nc, inner_nc, input_nc=None,
-                 subleft=None, subright=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
+                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
         """Construct a Unet submodule with skip connections.
 
         Parameters:
@@ -512,51 +520,39 @@ class UnetSkipConnectionBlock(nn.Module):
         upnorm = norm_layer(outer_nc)
 
         if outermost:
-            upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
+            upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1)
             down = [downconv]
             up = [uprelu, upconv, nn.Tanh()]
             # model = down + [submodule] + up
-            # model = [submodule] + up
-            model_left = down + [subleft]
-            model_right = [subright] + up
+            model = [submodule] + up
         elif innermost:
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=use_bias)
             down = [downrelu, downconv]
             up = [uprelu, upconv, upnorm]
-            # model = down + up
-            model_left = down
-            model_right = up
+            model = down + up
         else:
-            upconv = nn.ConvTranspose2d(inner_nc, outer_nc,
+            upconv = nn.ConvTranspose2d(inner_nc * 2, outer_nc,
                                         kernel_size=4, stride=2,
                                         padding=1, bias=use_bias)
             down = [downrelu, downconv, downnorm]
             up = [uprelu, upconv, upnorm]
 
             if use_dropout:
-                # model = down + [submodule] + up + [nn.Dropout(0.5)]
-                model_left = down + [subleft]
-                model_right = [subright] + up + [nn.Dropout(0.5)]
+                model = down + [submodule] + up + [nn.Dropout(0.5)]
             else:
-                # model = down + [submodule] + up
-                model_left = down + [subleft]
-                model_right = [subright] + up
+                model = down + [submodule] + up
 
-        # self.model = nn.Sequential(*model)
-        self.model_left = nn.Sequential(*model_left)
-        self.model_right = nn.Sequential(*model_right)
-
+        self.model = nn.Sequential(*model)
 
     def forward(self, x):
-        z = self.model_righ(self.model_left(x))
         if self.outermost:
-            return z
+            return self.model(x)
         else:   # add skip connections
-            return torch.cat([x, z], 1)
+            return torch.cat([x, self.model(x)], 1)
 
 
 class NLayerDiscriminator(nn.Module):

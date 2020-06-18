@@ -120,15 +120,15 @@ class Helper:
 
 	#iresnet
 	@staticmethod
-	def learning_rate(init, epoch, factor=60):
+	def learning_rate(init, epoch, factor=30):
 		optim_factor = 0
-		# if epoch > 3 * factor:
-		# 	optim_factor = 3
-		# elif epoch > 2 * factor:
-		# 	optim_factor = 2
-		# elif epoch > factor:
-		# 	optim_factor = 1
-		optim_factor = epoch // factor
+		if epoch > 3 * factor:
+			optim_factor = 3
+		elif epoch > 2 * factor:
+			optim_factor = 2
+		elif epoch > factor:
+			optim_factor = 1
+		# optim_factor = epoch // factor
 		return init*math.pow(0.2, optim_factor)
 
 	@staticmethod

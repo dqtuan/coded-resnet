@@ -5,8 +5,8 @@
 from init_fusionnet import *
 from fusionnet.unet import UnetModel
 from torch.utils.tensorboard import SummaryWriter
-
-args.fnet_name = "unet_{}_{}_{}_{}_{}".format(args.dataset, args.name, args.nactors, args.gan_mode, args.reduction)
+from ops import evaluate_unet
+import time
 
 writer = SummaryWriter('../results/runs/' + args.fnet_name)
 
@@ -23,9 +23,24 @@ init_epoch = int(args.resume_g)
 if init_epoch > 0:
 	fnet.load_networks(epoch=init_epoch)
 
-total_steps = len(iter(train_loader))
+if args.flag_overfit:
+	print('Train to overfit using test set')
+	# data_loader = test_loader
+	data_loader = DataLoader(dataset=test_dataset,
+		num_workers=args.threads,
+		batch_size=args.batch_size, shuffle=False)
+else:
+	data_loader = train_loader
+
+criterionL1 = torch.nn.L1Loss()
+elapsed_time = 0
+total_steps = len(iter(data_loader))
 for epoch in range(1 + init_epoch, args.epochs + 1 + init_epoch):
-	for batch_idx, (images, targets) in enumerate(train_loader):
+	start_time = time.time()
+	lr = Helper.learning_rate(args.lr, epoch - init_epoch)
+	Helper.update_lr(fnet.optimizer_G, lr)
+	print('|Learning rate = %.7f' % fnet.optimizers[0].param_groups[0]['lr'])
+	for batch_idx, (images, targets) in enumerate(data_loader):
 		inputs = images.to(device)
 		targets = targets.to(device)
 		N, A, C, H, W = inputs.shape
@@ -38,14 +53,24 @@ for epoch in range(1 + init_epoch, args.epochs + 1 + init_epoch):
 
 		if batch_idx % args.log_steps == 0:
 			losses = fnet.get_current_losses()
-			print("===> Epoch[{}]({}/{}): G-L1 {:.4f}".format(
-			epoch, batch_idx, total_steps,  losses['G_L1']))
+			sys.stdout.write('\r')
+			sys.stdout.write("===> Epoch[{}]({}/{}): L1 {:.4f}".format(epoch, batch_idx, total_steps, losses['G_L1']))
+			# print("===> Epoch[{}]({}/{}): G-L2 {:.4f}".format(epoch, batch_idx, total_steps, losses['G_L2']))
+			sys.stdout.flush()
+		if args.flag_overfit:
+			break
 
+	epoch_time = time.time() - start_time
+	elapsed_time += epoch_time
+	print('| Elapsed time : %d:%02d:%02d' % (Helper.get_hms(elapsed_time)))
 	writer.add_scalar('L1 loss', losses['G_L1'], epoch)
+	# writer.add_scalar('L2 loss', losses['G_L2'], epoch)
 	#checkpoint
 	if (epoch - 1) % args.save_steps == 0 or epoch == args.epochs + init_epoch:
 		print('saving the latest fnet (epoch %d, total_iters %d)' % (epoch, total_steps))
 		fnet.save_networks(epoch)
+		# lossf, corrects = evaluate_unet(test_loader, fnet, inet, criterionL1, device)
+		# print('Evaluate L1 {:.4f} Match: {:.4f}'.format(lossf, corrects))
 
-	fnet.update_learning_rate()                     # update learning rates at the end of every epoch.
+	# fnet.update_learning_rate()                     # update learning rates at the end of every epoch.
 print('Done')

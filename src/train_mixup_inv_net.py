@@ -46,7 +46,6 @@ in_shapes = inet.module.get_in_shapes()
 if analyse(args, inet, in_shapes, trainloader, testloader):
 	sys.exit('Done')
 
-
 ####################### Training ##############################
 if args.optimizer == "adam":
 	optimizer = optim.Adam(inet.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -55,7 +54,6 @@ else:
 						  momentum=0.9, weight_decay=args.weight_decay, nesterov=args.nesterov)
 
 scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
-
 
 print('|  Train: mixup: {} mixup_hidden {} alpha {} epochs {}'.format(args.mixup, args.mixup_hidden, args.mixup_alpha, args.epochs))
 print('|  Initial Learning Rate: ' + str(args.lr))
